@@ -17,7 +17,7 @@
       width: 100%;
       height: 100%;
       overflow: hidden;
-      background-color: #0284c7;
+      background-color: #0f172a;
       font-family: system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
     }
     canvas {
@@ -33,18 +33,18 @@
   <canvas id="gameCanvas"></canvas>
 
 <script>
-// --- LOCAL STORAGE & SETTINGS ---
+// --- LOCAL STORAGE & SETTINGS PERSISTENCE ---
 const STORAGE_PREFIX = 'avalanche_escape_';
 let bestDistance = parseInt(localStorage.getItem(STORAGE_PREFIX + 'best')) || 0;
 let cocoaMugs = parseInt(localStorage.getItem(STORAGE_PREFIX + 'mugs')) || 0;
 let unlockedSkins = JSON.parse(localStorage.getItem(STORAGE_PREFIX + 'skins')) || ['default'];
 let equippedSkin = localStorage.getItem(STORAGE_PREFIX + 'equipped_skin') || 'default';
 let leaderboard = JSON.parse(localStorage.getItem(STORAGE_PREFIX + 'leaderboard')) || [
-  { initials: 'ALP', distance: 1500 },
-  { initials: 'SNW', distance: 1200 },
-  { initials: 'ICE', distance: 950 },
-  { initials: 'SKI', distance: 750 },
-  { initials: 'BRR', distance: 500 }
+  { initials: 'ALP', distance: 1800 },
+  { initials: 'SNW', distance: 1400 },
+  { initials: 'ICE', distance: 1100 },
+  { initials: 'SKI', distance: 850 },
+  { initials: 'BRR', distance: 600 }
 ];
 
 let settings = JSON.parse(localStorage.getItem(STORAGE_PREFIX + 'settings')) || {
@@ -60,9 +60,9 @@ const SKINS = {
   gold: { id: 'gold', name: 'Golden Summit', cost: 75, suitColor: '#eab308', scarfColor: '#ffffff', accentColor: '#0f172a' }
 };
 
-// In-Game Arcade High Score Initials Selector State
+// Arcade Initials Selector State
 let isHighScoreRun = false;
-let initialsIndices = [18, 10, 8]; // 'S', 'K', 'I'
+let initialsIndices = [18, 10, 8]; // Default 'S', 'K', 'I'
 let activeInitialSlot = 0;
 let scoreSubmitted = false;
 const ALPHABET = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789'.split('');
@@ -251,20 +251,29 @@ let previousMenuState = 'MENU';
 let countdownTimer = 3;
 let countdownInterval = null;
 
-// World & Camera
+// World & Physics
 let distance = 0;
 let runMugsCollected = 0;
 let cameraY = 0;
 let screenShake = 0;
 let timeAlive = 0;
 
-// Ambient Snowflakes
-const ambientSnow = Array.from({ length: 50 }, () => ({
+// Ambient Particles & Depth Particles
+const ambientSnow = Array.from({ length: 45 }, () => ({
   x: Math.random() * window.innerWidth,
   y: Math.random() * window.innerHeight,
-  r: Math.random() * 2.5 + 1,
-  speed: Math.random() * 80 + 40,
-  drift: Math.random() * 30 - 15
+  r: Math.random() * 2 + 1,
+  speed: Math.random() * 60 + 30,
+  drift: Math.random() * 20 - 10
+}));
+
+const lensSnow = Array.from({ length: 14 }, () => ({
+  x: Math.random() * window.innerWidth,
+  y: Math.random() * window.innerHeight,
+  r: Math.random() * 8 + 6, // Large foreground blur
+  speed: Math.random() * 180 + 120,
+  drift: Math.random() * 50 - 25,
+  alpha: Math.random() * 0.35 + 0.15
 }));
 
 // Player Setup
@@ -306,7 +315,74 @@ let avalancheSpeed = 260;
 // Entities & Particles
 let obstacles = [];
 let particles = [];
+let powderSpray = [];
 let carveTrails = [];
+
+// --- TIME OF DAY LIGHTING ENGINE ---
+function getTimeOfDayLighting() {
+  // Cycle repeats every 2000m (0 to 1 ratio)
+  const cycle = (distance % 2000) / 2000;
+  
+  // 0.0 - 0.25: Dawn / Sunrise
+  // 0.25 - 0.50: Midday Arctic Blue
+  // 0.50 - 0.75: Sunset Crimson/Gold
+  // 0.75 - 1.00: Deep Night & Aurora
+  if (cycle < 0.25) {
+    const t = cycle / 0.25;
+    return {
+      skyTop: blendColor('#0f172a', '#0284c7', t),
+      skyBottom: blendColor('#f97316', '#bae6fd', t),
+      snowTop: blendColor('#ffedd5', '#f8fafc', t),
+      snowBottom: blendColor('#fed7aa', '#cbd5e1', t),
+      sunAngle: -0.6 + t * 0.3,
+      sunColor: '#f97316',
+      isNight: false
+    };
+  } else if (cycle < 0.50) {
+    const t = (cycle - 0.25) / 0.25;
+    return {
+      skyTop: blendColor('#0284c7', '#0369a1', t),
+      skyBottom: blendColor('#bae6fd', '#e0f2fe', t),
+      snowTop: blendColor('#f8fafc', '#f1f5f9', t),
+      snowBottom: blendColor('#cbd5e1', '#94a3b8', t),
+      sunAngle: -0.3 + t * 0.4,
+      sunColor: '#fef08a',
+      isNight: false
+    };
+  } else if (cycle < 0.75) {
+    const t = (cycle - 0.50) / 0.25;
+    return {
+      skyTop: blendColor('#0369a1', '#312e81', t),
+      skyBottom: blendColor('#e0f2fe', '#f43f5e', t),
+      snowTop: blendColor('#f1f5f9', '#fecdd3', t),
+      snowBottom: blendColor('#94a3b8', '#64748b', t),
+      sunAngle: 0.1 + t * 0.5,
+      sunColor: '#f43f5e',
+      isNight: false
+    };
+  } else {
+    const t = (cycle - 0.75) / 0.25;
+    return {
+      skyTop: blendColor('#312e81', '#0f172a', t),
+      skyBottom: blendColor('#f43f5e', '#1e1b4b', t),
+      snowTop: blendColor('#fecdd3', '#e2e8f0', t),
+      snowBottom: blendColor('#64748b', '#334155', t),
+      sunAngle: 0.6,
+      sunColor: '#a855f7',
+      isNight: true
+    };
+  }
+}
+
+function blendColor(c1, c2, t) {
+  const hex = (c) => parseInt(c.replace('#', ''), 16);
+  const r1 = (hex(c1) >> 16) & 255, g1 = (hex(c1) >> 8) & 255, b1 = hex(c1) & 255;
+  const r2 = (hex(c2) >> 16) & 255, g2 = (hex(c2) >> 8) & 255, b2 = hex(c2) & 255;
+  const r = Math.round(r1 + (r2 - r1) * t);
+  const g = Math.round(g1 + (g2 - g1) * t);
+  const b = Math.round(b1 + (b2 - b1) * t);
+  return `rgb(${r},${g},${b})`;
+}
 
 // --- PROCEDURAL GENERATION ---
 function spawnObstaclesAhead() {
@@ -330,7 +406,7 @@ function spawnObstaclesAhead() {
   }
 }
 
-// --- PARTICLE SYSTEM ---
+// --- PARTICLE SYSTEM & FINE POWDER SPRAY ---
 function addSnowburst(x, y, count = 12, colorOverride = null) {
   for (let i = 0; i < count; i++) {
     const ang = Math.random() * Math.PI * 2;
@@ -347,7 +423,22 @@ function addSnowburst(x, y, count = 12, colorOverride = null) {
   }
 }
 
+function addPowderSpray(x, y, dir) {
+  for (let i = 0; i < 3; i++) {
+    powderSpray.push({
+      x: x + (Math.random() - 0.5) * 12,
+      y: y + (Math.random() - 0.5) * 8,
+      vx: -dir * (30 + Math.random() * 60),
+      vy: -Math.random() * 30 - 20,
+      radius: 4 + Math.random() * 6,
+      alpha: 0.6,
+      life: 0.5
+    });
+  }
+}
+
 function updateParticles(dt) {
+  // Particles
   for (let i = particles.length - 1; i >= 0; i--) {
     const p = particles[i];
     p.x += p.vx * dt;
@@ -356,17 +447,38 @@ function updateParticles(dt) {
     if (p.life <= 0) particles.splice(i, 1);
   }
 
+  // Fine Powder Spray
+  for (let i = powderSpray.length - 1; i >= 0; i--) {
+    const p = powderSpray[i];
+    p.x += p.vx * dt;
+    p.y += p.vy * dt;
+    p.radius += dt * 10;
+    p.alpha -= dt * 1.2;
+    if (p.alpha <= 0) powderSpray.splice(i, 1);
+  }
+
+  // Carve Trails
   for (let i = carveTrails.length - 1; i >= 0; i--) {
     carveTrails[i].alpha -= dt * 0.75;
     if (carveTrails[i].alpha <= 0) carveTrails.splice(i, 1);
   }
 
+  // Ambient Snow
   ambientSnow.forEach(s => {
     s.y += (s.speed + (gameState === 'PLAYING' ? player.vy * 0.5 : 20)) * dt;
     s.x += s.drift * dt;
     if (s.y > height) { s.y = -10; s.x = Math.random() * width; }
     if (s.x < 0) s.x = width;
     if (s.x > width) s.x = 0;
+  });
+
+  // Foreground Lens Snow
+  lensSnow.forEach(s => {
+    s.y += (s.speed + (gameState === 'PLAYING' ? player.vy * 0.9 : 40)) * dt;
+    s.x += s.drift * dt;
+    if (s.y > height + 20) { s.y = -20; s.x = Math.random() * width; }
+    if (s.x < -20) s.x = width + 20;
+    if (s.x > width + 20) s.x = -20;
   });
 }
 
@@ -383,7 +495,7 @@ function triggerSteer(dir) {
   player.vx += dir * 240;
   player.angle = dir * 0.38;
   audio.playCarve();
-  addSnowburst(player.x, player.y - cameraY, 4);
+  addPowderSpray(player.x, player.y - cameraY, dir);
 }
 
 function triggerJump() {
@@ -409,7 +521,7 @@ function triggerTuck() {
 function togglePause() {
   if (gameState === 'PLAYING') {
     gameState = 'PAUSED';
-    screenShake = 0; // Clear screen shake on pause
+    screenShake = 0;
     audio.setRumbleVolume(0);
   } else if (gameState === 'PAUSED') {
     gameState = 'PLAYING';
@@ -451,7 +563,7 @@ window.addEventListener('touchend', (e) => {
     return;
   }
 
-  // Swipe Action Recognition
+  // Swipe Recognition
   if (Math.abs(dx) > SWIPE_THRESHOLD || Math.abs(dy) > SWIPE_THRESHOLD) {
     if (Math.abs(dx) > Math.abs(dy)) {
       triggerSteer(dx > 0 ? 1 : -1);
@@ -462,7 +574,7 @@ window.addEventListener('touchend', (e) => {
   }
 }, { passive: false });
 
-// Keyboard Fallback
+// Desktop Keyboard Fallback
 const keys = {};
 window.addEventListener('keydown', (e) => {
   audio.init();
@@ -486,7 +598,7 @@ window.addEventListener('keyup', (e) => { keys[e.code] = false; });
 // --- GAME FLOW LOGIC ---
 function startCountdown() {
   gameState = 'COUNTDOWN';
-  screenShake = 0; // Fix screen shake bug on restart!
+  screenShake = 0; // Fix screen shake bug on restart
   countdownTimer = 3;
   player.reset();
   avalancheY = -400;
@@ -498,6 +610,7 @@ function startCountdown() {
   scoreSubmitted = false;
   obstacles = [];
   particles = [];
+  powderSpray = [];
   carveTrails = [];
 
   if (countdownInterval) clearInterval(countdownInterval);
@@ -560,7 +673,6 @@ function handleMenuTouch(x, y) {
   } else if (gameState === 'LEADERBOARD') {
     if (y > height * 0.84) gameState = 'MENU';
   } else if (gameState === 'GAMEOVER') {
-    // In-Canvas Arcade Initials Entry Controls
     if (isHighScoreRun && !scoreSubmitted) {
       const slotWidth = 50;
       const startX = width / 2 - 80;
@@ -568,14 +680,14 @@ function handleMenuTouch(x, y) {
 
       for (let i = 0; i < 3; i++) {
         const slotX = startX + i * 55;
-        // Up Arrow Click
+        // Up Arrow
         if (x > slotX && x < slotX + slotWidth && y > pickerY - 35 && y < pickerY - 5) {
           initialsIndices[i] = (initialsIndices[i] + 1) % ALPHABET.length;
           activeInitialSlot = i;
           audio.playClick();
           return;
         }
-        // Down Arrow Click
+        // Down Arrow
         if (x > slotX && x < slotX + slotWidth && y > pickerY + 45 && y < pickerY + 75) {
           initialsIndices[i] = (initialsIndices[i] - 1 + ALPHABET.length) % ALPHABET.length;
           activeInitialSlot = i;
@@ -598,9 +710,8 @@ function handleMenuTouch(x, y) {
         return;
       }
     } else {
-      // Action Buttons when High Score submitted or normal run ended
-      if (y > height * 0.62 && y < height * 0.70) startCountdown(); // Restart
-      if (y > height * 0.72 && y < height * 0.80) { screenShake = 0; gameState = 'MENU'; } // Main Menu
+      if (y > height * 0.62 && y < height * 0.70) startCountdown();
+      if (y > height * 0.72 && y < height * 0.80) { screenShake = 0; gameState = 'MENU'; }
     }
   }
 }
@@ -614,14 +725,16 @@ function update(dt) {
 
   timeAlive += dt;
 
-  // Tap & Hold Steering
+  // Tap & Hold Continuous Steering
   if (isPointerDown) {
     if (pointerCurrentX < width * 0.42) {
       player.vx -= 480 * dt;
       player.angle = -0.32;
+      addPowderSpray(player.x, player.y - cameraY, -1);
     } else if (pointerCurrentX > width * 0.58) {
       player.vx += 480 * dt;
       player.angle = 0.32;
+      addPowderSpray(player.x, player.y - cameraY, 1);
     }
   }
 
@@ -711,7 +824,7 @@ function updateObstaclesAndCollisions() {
     if (dist < 34) {
       if (obs.type === 'MUG') {
         if (!obs.hit) {
-          obs.hit = true;
+          obs.hit = true; // Collect mug immediately!
           cocoaMugs++;
           runMugsCollected++;
           audio.playPickup();
@@ -723,7 +836,7 @@ function updateObstaclesAndCollisions() {
         if (!obs.hit && !player.isJumping) {
           obs.hit = true;
           player.isJumping = true;
-          player.vz = 580;
+          player.vz = 580; // Fly high over trees/rocks!
           audio.playJump();
           triggerHaptic(40);
           player.squashX = 0.6;
@@ -731,7 +844,7 @@ function updateObstaclesAndCollisions() {
           addSnowburst(player.x, player.y - cameraY, 16);
         }
       } else if (player.isJumping || player.z > 18) {
-        // Clear obstacle cleanly in mid-air
+        // Clear obstacles in mid-air cleanly!
       } else {
         if (!obs.hit) {
           if (obs.type === 'ICE') {
@@ -756,7 +869,7 @@ function updateObstaclesAndCollisions() {
 
 function triggerGameOver() {
   gameState = 'GAMEOVER';
-  screenShake = 0; // Instantly zero out residual screen shake!
+  screenShake = 0; // Instantly zero out camera vibration!
   audio.playCrash();
   triggerHaptic([100, 50, 100]);
   isHighScoreRun = checkHighScore(distance);
@@ -764,9 +877,11 @@ function triggerGameOver() {
   saveState();
 }
 
-// --- ADVANCED RENDER ENGINE ---
+// --- VECTOR ATMOSPHERE RENDER ENGINE ---
 function render() {
   ctx.clearRect(0, 0, width, height);
+
+  const light = getTimeOfDayLighting();
 
   ctx.save();
   if (screenShake > 0.1 && gameState === 'PLAYING') {
@@ -775,16 +890,19 @@ function render() {
     ctx.translate(rx, ry);
   }
 
-  drawAuroraSky();
-  drawSnowSlope();
+  drawSkyAndAurora(light);
+  drawSnowSlope(light);
 
   if (['PLAYING', 'COUNTDOWN', 'PAUSED', 'GAMEOVER'].includes(gameState)) {
     drawCarveTrails();
-    drawObstacles();
+    drawObstacles(light);
+    drawPowderSpray();
     drawParticles();
-    drawPlayer();
+    drawPlayer(light);
     drawAvalancheWall();
     drawSpeedLines();
+    drawDepthLensParticles();
+    drawFrostVignette();
   }
 
   drawAmbientAtmosphere();
@@ -793,41 +911,42 @@ function render() {
   drawUI();
 }
 
-// 1. Dynamic Aurora Sky
-function drawAuroraSky() {
+// 1. Dynamic Sky & Aurora Borealis
+function drawSkyAndAurora(light) {
   const skyGrad = ctx.createLinearGradient(0, 0, 0, height * 0.45);
-  skyGrad.addColorStop(0, '#0f172a');
-  skyGrad.addColorStop(0.5, '#0284c7');
-  skyGrad.addColorStop(1, '#bae6fd');
+  skyGrad.addColorStop(0, light.skyTop);
+  skyGrad.addColorStop(1, light.skyBottom);
   ctx.fillStyle = skyGrad;
   ctx.fillRect(0, 0, width, height);
 
-  ctx.save();
-  ctx.globalAlpha = 0.35;
-  const time = timeAlive * 0.5;
-  const auroraGrad = ctx.createLinearGradient(0, 0, width, height * 0.3);
-  auroraGrad.addColorStop(0, '#10b981');
-  auroraGrad.addColorStop(0.5, '#06b6d4');
-  auroraGrad.addColorStop(1, '#a855f7');
-  ctx.fillStyle = auroraGrad;
+  // Aurora Borealis curtains during evening / night
+  if (light.isNight) {
+    ctx.save();
+    ctx.globalAlpha = 0.4;
+    const time = timeAlive * 0.6;
+    const auroraGrad = ctx.createLinearGradient(0, 0, width, height * 0.3);
+    auroraGrad.addColorStop(0, '#10b981');
+    auroraGrad.addColorStop(0.5, '#06b6d4');
+    auroraGrad.addColorStop(1, '#a855f7');
+    ctx.fillStyle = auroraGrad;
 
-  ctx.beginPath();
-  ctx.moveTo(0, 0);
-  for (let x = 0; x <= width; x += 30) {
-    const y = Math.sin(x * 0.01 + time) * 35 + height * 0.15;
-    ctx.lineTo(x, y);
+    ctx.beginPath();
+    ctx.moveTo(0, 0);
+    for (let x = 0; x <= width; x += 30) {
+      const y = Math.sin(x * 0.01 + time) * 40 + height * 0.12;
+      ctx.lineTo(x, y);
+    }
+    ctx.lineTo(width, 0);
+    ctx.fill();
+    ctx.restore();
   }
-  ctx.lineTo(width, 0);
-  ctx.fill();
-  ctx.restore();
 }
 
-// 2. Snow Slope
-function drawSnowSlope() {
+// 2. Snow Slope & Side Forests
+function drawSnowSlope(light) {
   const slopeGrad = ctx.createLinearGradient(0, height * 0.25, 0, height);
-  slopeGrad.addColorStop(0, '#f8fafc');
-  slopeGrad.addColorStop(0.6, '#e2e8f0');
-  slopeGrad.addColorStop(1, '#cbd5e1');
+  slopeGrad.addColorStop(0, light.snowTop);
+  slopeGrad.addColorStop(1, light.snowBottom);
   ctx.fillStyle = slopeGrad;
   ctx.fillRect(0, height * 0.25, width, height);
 
@@ -845,7 +964,7 @@ function drawSnowSlope() {
   ctx.fillRect(width - margin, 0, margin, height);
 }
 
-// 3. Carve Trails
+// 3. Carve Trails & Powder Spray
 function drawCarveTrails() {
   carveTrails.forEach(t => {
     ctx.save();
@@ -859,23 +978,41 @@ function drawCarveTrails() {
   });
 }
 
-// 4. Vector Obstacles
-function drawObstacles() {
+function drawPowderSpray() {
+  powderSpray.forEach(p => {
+    ctx.save();
+    ctx.globalAlpha = Math.max(0, p.alpha);
+    ctx.fillStyle = '#ffffff';
+    ctx.beginPath();
+    ctx.arc(p.x, p.y, p.radius, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.restore();
+  });
+}
+
+// 4. Stylized Vector Obstacles & Dynamic Shadows
+function drawObstacles(light) {
+  const shadowOffsetX = Math.cos(light.sunAngle) * 18;
+  const shadowOffsetY = Math.sin(light.sunAngle) * 10 + 6;
+
   obstacles.forEach(obs => {
-    if (obs.hit && obs.type === 'MUG') return;
+    if (obs.hit && obs.type === 'MUG') return; // Hide collected mug!
 
     const screenY = obs.y - cameraY;
     if (screenY < -60 || screenY > height + 60) return;
 
     if (obs.type === 'TREE') {
+      // Dynamic Sun Shadow
       ctx.fillStyle = 'rgba(15, 23, 42, 0.22)';
       ctx.beginPath();
-      ctx.ellipse(obs.x, screenY + 6, 20, 8, 0, 0, Math.PI * 2);
+      ctx.ellipse(obs.x + shadowOffsetX, screenY + shadowOffsetY, 22, 7, light.sunAngle, 0, Math.PI * 2);
       ctx.fill();
 
+      // Trunk
       ctx.fillStyle = '#1e293b';
       ctx.fillRect(obs.x - 4, screenY - 6, 8, 14);
 
+      // Multi-tier Pine Needles
       const layers = [
         { y: screenY - 8, w: 22, h: 22, col: '#065f46' },
         { y: screenY - 22, w: 17, h: 20, col: '#047857' },
@@ -900,7 +1037,7 @@ function drawObstacles() {
     } else if (obs.type === 'BOULDER') {
       ctx.fillStyle = 'rgba(15, 23, 42, 0.25)';
       ctx.beginPath();
-      ctx.ellipse(obs.x, screenY + 4, 18, 8, 0, 0, Math.PI * 2);
+      ctx.ellipse(obs.x + shadowOffsetX * 0.6, screenY + shadowOffsetY * 0.6, 18, 7, light.sunAngle, 0, Math.PI * 2);
       ctx.fill();
 
       ctx.fillStyle = '#334155';
@@ -962,11 +1099,14 @@ function drawObstacles() {
       ctx.fill();
 
     } else if (obs.type === 'MUG') {
+      // Additive Glow Aura
       ctx.save();
-      ctx.fillStyle = 'rgba(234, 179, 8, 0.35)';
+      ctx.globalCompositeOperation = 'lighter';
+      ctx.fillStyle = 'rgba(234, 179, 8, 0.45)';
       ctx.beginPath();
-      ctx.arc(obs.x, screenY, 18, 0, Math.PI * 2);
+      ctx.arc(obs.x, screenY, 20 + Math.sin(obs.steamTimer * 2) * 3, 0, Math.PI * 2);
       ctx.fill();
+      ctx.restore();
 
       ctx.fillStyle = '#ef4444';
       ctx.fillRect(obs.x - 8, screenY - 8, 16, 16);
@@ -979,7 +1119,7 @@ function drawObstacles() {
       ctx.arc(obs.x + 9, screenY, 4, -Math.PI * 0.5, Math.PI * 0.5);
       ctx.stroke();
 
-      ctx.strokeStyle = 'rgba(255, 255, 255, 0.8)';
+      ctx.strokeStyle = 'rgba(255, 255, 255, 0.85)';
       ctx.lineWidth = 1.5;
       const steamY = screenY - 10 - Math.sin(obs.steamTimer) * 4;
       ctx.beginPath();
@@ -988,31 +1128,36 @@ function drawObstacles() {
       ctx.moveTo(obs.x + 3, steamY - 2);
       ctx.lineTo(obs.x + 3, steamY - 8);
       ctx.stroke();
-      ctx.restore();
     }
   });
 }
 
 // 5. Player Vector Character
-function drawPlayer() {
+function drawPlayer(light) {
   const screenY = player.y - cameraY - player.z;
   const currentSkin = SKINS[equippedSkin];
+  const shadowOffsetX = Math.cos(light.sunAngle) * (14 + player.z * 0.1);
+  const shadowOffsetY = Math.sin(light.sunAngle) * 8 + 12 + player.z * 0.6;
 
   ctx.save();
   ctx.translate(player.x, screenY);
-  ctx.rotate(player.angle);
-  ctx.scale(player.squashX, player.squashY);
 
+  // Dynamic Sun Shadow
   const shadowScale = 1 + player.z * 0.003;
   ctx.fillStyle = 'rgba(15, 23, 42, 0.28)';
   ctx.beginPath();
-  ctx.ellipse(0, 14 + player.z * 0.7, 14 * shadowScale, 5 * shadowScale, 0, 0, Math.PI * 2);
+  ctx.ellipse(shadowOffsetX, shadowOffsetY, 14 * shadowScale, 5 * shadowScale, light.sunAngle, 0, Math.PI * 2);
   ctx.fill();
 
+  ctx.rotate(player.angle);
+  ctx.scale(player.squashX, player.squashY);
+
+  // Skis
   ctx.fillStyle = currentSkin.accentColor;
   ctx.fillRect(-9, -18, 4, 34);
   ctx.fillRect(5, -18, 4, 34);
 
+  // Waving Scarf Physics
   const wave = Math.sin(player.scarfWave) * 6;
   ctx.fillStyle = currentSkin.scarfColor;
   ctx.beginPath();
@@ -1021,11 +1166,13 @@ function drawPlayer() {
   ctx.quadraticCurveTo(0, 14, 0, 2);
   ctx.fill();
 
+  // Suit Body
   ctx.fillStyle = currentSkin.suitColor;
   ctx.beginPath();
   ctx.arc(0, 0, 11, 0, Math.PI * 2);
   ctx.fill();
 
+  // Helmet & Visor Glare
   ctx.fillStyle = '#0f172a';
   ctx.beginPath();
   ctx.arc(0, -2, 7, 0, Math.PI * 2);
@@ -1039,16 +1186,10 @@ function drawPlayer() {
   ctx.restore();
 }
 
-// 6. Volumetric Avalanche Snow Wall
+// 6. Volumetric Avalanche Wall
 function drawAvalancheWall() {
   const wallScreenY = avalancheY - cameraY;
   if (wallScreenY < -120) return;
-
-  const prox = Math.max(0, 1 - ((player.y - avalancheY) / 500));
-  if (prox > 0.6) {
-    ctx.fillStyle = `rgba(239, 68, 68, ${ (prox - 0.6) * 0.4 })`;
-    ctx.fillRect(0, 0, width, height);
-  }
 
   const grad = ctx.createLinearGradient(0, wallScreenY - 100, 0, wallScreenY + 60);
   grad.addColorStop(0, 'rgba(248, 250, 252, 0.98)');
@@ -1070,7 +1211,29 @@ function drawAvalancheWall() {
   ctx.fill();
 }
 
-// 7. Radial Speed Lines
+// 7. Cinematic Frost Vignette
+function drawFrostVignette() {
+  const prox = Math.max(0, 1 - ((player.y - avalancheY) / 500));
+  if (prox <= 0.1) return;
+
+  const grad = ctx.createRadialGradient(width / 2, height / 2, width * 0.3, width / 2, height / 2, width * 0.7);
+  grad.addColorStop(0, 'rgba(186, 230, 253, 0.0)');
+  grad.addColorStop(1, `rgba(186, 230, 253, ${prox * 0.55})`);
+
+  ctx.fillStyle = grad;
+  ctx.fillRect(0, 0, width, height);
+}
+
+// 8. Depth-of-Field Lens Particles & Speed Lines
+function drawDepthLensParticles() {
+  ctx.fillStyle = 'rgba(255, 255, 255, 0.4)';
+  lensSnow.forEach(s => {
+    ctx.beginPath();
+    ctx.arc(s.x, s.y, s.r, 0, Math.PI * 2);
+    ctx.fill();
+  });
+}
+
 function drawSpeedLines() {
   if (!player.isTucking && player.z <= 0) return;
 
@@ -1238,7 +1401,7 @@ function drawUI() {
     ctx.fillText(`DISTANCE: ${Math.floor(distance)}m`, 20, 40);
     ctx.fillText(`☕ ${runMugsCollected}`, 20, 65);
 
-    // Pause Button
+    // Pause HUD Button (⏸)
     ctx.fillStyle = 'rgba(15, 23, 42, 0.6)';
     ctx.beginPath();
     ctx.arc(width - 35, 35, 20, 0, Math.PI * 2);
@@ -1248,11 +1411,9 @@ function drawUI() {
     ctx.fillRect(width - 34, 26, 4, 18);
 
   } else if (gameState === 'GAMEOVER') {
-    // Glassmorphic Card Overlay
     ctx.fillStyle = 'rgba(15, 23, 42, 0.88)';
     ctx.fillRect(0, 0, width, height);
 
-    // Card Container
     const cardWidth = Math.min(width * 0.88, 420);
     const cardX = (width - cardWidth) / 2;
     const cardY = height * 0.12;
@@ -1264,20 +1425,18 @@ function drawUI() {
     ctx.lineWidth = 2;
     ctx.strokeRect(cardX, cardY, cardWidth, cardHeight);
 
-    // Dynamic Scaling Title to Fix Truncation Bug
+    // Dynamic Scaling Title
     const titleFontSize = Math.min(28, cardWidth * 0.068);
     ctx.font = `900 ${titleFontSize}px system-ui, sans-serif`;
     ctx.fillStyle = '#ef4444';
     ctx.textAlign = 'center';
     ctx.fillText('AVALANCHE CAUGHT YOU!', width / 2, cardY + 50);
 
-    // Run Stats Card
     ctx.fillStyle = '#f8fafc';
     ctx.font = '600 16px system-ui, sans-serif';
     ctx.fillText(`DISTANCE SURVIVED: ${Math.floor(distance)}m`, width / 2, cardY + 95);
     ctx.fillText(`HOT COCOA MUGS: ☕ ${runMugsCollected}`, width / 2, cardY + 125);
 
-    // High Score Arcade Initials Selector (Ice Hopper / Arcade Style)
     if (isHighScoreRun && !scoreSubmitted) {
       ctx.fillStyle = '#f59e0b';
       ctx.font = '800 18px system-ui, sans-serif';
