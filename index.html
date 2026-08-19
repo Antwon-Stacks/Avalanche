@@ -24,7 +24,7 @@
       width: 100vw;
       height: 100vh;
       display: block;
-      background-color: #e0f2fe;
+      background-color: #0f172a;
     }
   </style>
 </head>
@@ -33,7 +33,7 @@
   <canvas id="gameCanvas"></canvas>
 
 <script>
-// --- LOCAL STORAGE & META PROGRESSION ---
+// --- LOCAL STORAGE & SETTINGS ---
 const STORAGE_PREFIX = 'avalanche_escape_';
 let bestDistance = parseInt(localStorage.getItem(STORAGE_PREFIX + 'best')) || 0;
 let cocoaMugs = parseInt(localStorage.getItem(STORAGE_PREFIX + 'mugs')) || 0;
@@ -47,11 +47,17 @@ let leaderboard = JSON.parse(localStorage.getItem(STORAGE_PREFIX + 'leaderboard'
   { initials: 'BRR', distance: 500 }
 ];
 
+let settings = JSON.parse(localStorage.getItem(STORAGE_PREFIX + 'settings')) || {
+  sfxOn: true,
+  volume: 0.8,
+  haptics: true
+};
+
 const SKINS = {
-  default: { id: 'default', name: 'Alpine Racer', cost: 0, suitColor: '#ef4444', accentColor: '#ffffff' },
-  neon: { id: 'neon', name: 'Neon Nitro', cost: 20, suitColor: '#06b6d4', accentColor: '#f43f5e' },
-  retro: { id: 'retro', name: 'Retro Ski', cost: 40, suitColor: '#f59e0b', accentColor: '#10b981' },
-  gold: { id: 'gold', name: 'Golden Shredder', cost: 75, suitColor: '#eab308', accentColor: '#1e293b' }
+  default: { id: 'default', name: 'Alpine Racer', cost: 0, suitColor: '#ef4444', scarfColor: '#f1f5f9', accentColor: '#38bdf8' },
+  neon: { id: 'neon', name: 'Neon Nitro', cost: 20, suitColor: '#06b6d4', scarfColor: '#f43f5e', accentColor: '#a855f7' },
+  retro: { id: 'retro', name: 'Retro Shredder', cost: 40, suitColor: '#f59e0b', scarfColor: '#10b981', accentColor: '#3b82f6' },
+  gold: { id: 'gold', name: 'Golden Summit', cost: 75, suitColor: '#eab308', scarfColor: '#ffffff', accentColor: '#0f172a' }
 };
 
 function saveState() {
@@ -60,6 +66,13 @@ function saveState() {
   localStorage.setItem(STORAGE_PREFIX + 'skins', JSON.stringify(unlockedSkins));
   localStorage.setItem(STORAGE_PREFIX + 'equipped_skin', equippedSkin);
   localStorage.setItem(STORAGE_PREFIX + 'leaderboard', JSON.stringify(leaderboard));
+  localStorage.setItem(STORAGE_PREFIX + 'settings', JSON.stringify(settings));
+}
+
+function triggerHaptic(pattern) {
+  if (settings.haptics && navigator.vibrate) {
+    navigator.vibrate(pattern);
+  }
 }
 
 function updateLeaderboard(newDist) {
@@ -77,7 +90,7 @@ function updateLeaderboard(newDist) {
   return false;
 }
 
-// --- WEB AUDIO SYNTHESIZER ---
+// --- SYNTHESIZED WEB AUDIO ENGINE ---
 class AudioEngine {
   constructor() {
     this.ctx = null;
@@ -113,7 +126,7 @@ class AudioEngine {
 
     const filter = this.ctx.createBiquadFilter();
     filter.type = 'lowpass';
-    filter.frequency.value = 120;
+    filter.frequency.value = 110;
 
     this.rumbleGain = this.ctx.createGain();
     this.rumbleGain.gain.value = 0.0;
@@ -126,18 +139,19 @@ class AudioEngine {
 
   setRumbleVolume(volume) {
     if (this.rumbleGain && this.ctx) {
-      this.rumbleGain.gain.setTargetAtTime(Math.min(volume, 0.35), this.ctx.currentTime, 0.1);
+      const vol = settings.sfxOn ? Math.min(volume * settings.volume, 0.4) : 0;
+      this.rumbleGain.gain.setTargetAtTime(vol, this.ctx.currentTime, 0.1);
     }
   }
 
   playCarve() {
-    if (!this.ctx) return;
+    if (!this.ctx || !settings.sfxOn) return;
     const osc = this.ctx.createOscillator();
     const gain = this.ctx.createGain();
     osc.type = 'sawtooth';
-    osc.frequency.setValueAtTime(80, this.ctx.currentTime);
-    osc.frequency.exponentialRampToValueAtTime(30, this.ctx.currentTime + 0.08);
-    gain.gain.setValueAtTime(0.08, this.ctx.currentTime);
+    osc.frequency.setValueAtTime(90, this.ctx.currentTime);
+    osc.frequency.exponentialRampToValueAtTime(35, this.ctx.currentTime + 0.08);
+    gain.gain.setValueAtTime(0.12 * settings.volume, this.ctx.currentTime);
     gain.gain.linearRampToValueAtTime(0.01, this.ctx.currentTime + 0.08);
     osc.connect(gain);
     gain.connect(this.ctx.destination);
@@ -146,57 +160,57 @@ class AudioEngine {
   }
 
   playJump() {
-    if (!this.ctx) return;
+    if (!this.ctx || !settings.sfxOn) return;
     const osc = this.ctx.createOscillator();
     const gain = this.ctx.createGain();
     osc.type = 'sine';
-    osc.frequency.setValueAtTime(250, this.ctx.currentTime);
-    osc.frequency.exponentialRampToValueAtTime(600, this.ctx.currentTime + 0.2);
-    gain.gain.setValueAtTime(0.2, this.ctx.currentTime);
-    gain.gain.linearRampToValueAtTime(0.01, this.ctx.currentTime + 0.2);
+    osc.frequency.setValueAtTime(260, this.ctx.currentTime);
+    osc.frequency.exponentialRampToValueAtTime(650, this.ctx.currentTime + 0.22);
+    gain.gain.setValueAtTime(0.25 * settings.volume, this.ctx.currentTime);
+    gain.gain.linearRampToValueAtTime(0.01, this.ctx.currentTime + 0.22);
     osc.connect(gain);
     gain.connect(this.ctx.destination);
     osc.start();
-    osc.stop(this.ctx.currentTime + 0.2);
+    osc.stop(this.ctx.currentTime + 0.22);
   }
 
   playPickup() {
-    if (!this.ctx) return;
-    const notes = [587.33, 880]; // D5 to A5
+    if (!this.ctx || !settings.sfxOn) return;
+    const notes = [523.25, 659.25, 783.99]; // C5, E5, G5
     notes.forEach((freq, idx) => {
       const osc = this.ctx.createOscillator();
       const gain = this.ctx.createGain();
       osc.type = 'triangle';
       osc.frequency.value = freq;
-      const startTime = this.ctx.currentTime + (idx * 0.08);
-      gain.gain.setValueAtTime(0.25, startTime);
-      gain.gain.linearRampToValueAtTime(0.01, startTime + 0.12);
+      const startTime = this.ctx.currentTime + (idx * 0.06);
+      gain.gain.setValueAtTime(0.2 * settings.volume, startTime);
+      gain.gain.linearRampToValueAtTime(0.01, startTime + 0.1);
       osc.connect(gain);
       gain.connect(this.ctx.destination);
       osc.start(startTime);
-      osc.stop(startTime + 0.12);
+      osc.stop(startTime + 0.1);
     });
   }
 
   playCrash() {
-    if (!this.ctx) return;
+    if (!this.ctx || !settings.sfxOn) return;
     const osc = this.ctx.createOscillator();
     const gain = this.ctx.createGain();
     osc.type = 'sawtooth';
-    osc.frequency.setValueAtTime(140, this.ctx.currentTime);
-    osc.frequency.linearRampToValueAtTime(30, this.ctx.currentTime + 0.35);
-    gain.gain.setValueAtTime(0.4, this.ctx.currentTime);
-    gain.gain.linearRampToValueAtTime(0.01, this.ctx.currentTime + 0.35);
+    osc.frequency.setValueAtTime(150, this.ctx.currentTime);
+    osc.frequency.linearRampToValueAtTime(25, this.ctx.currentTime + 0.38);
+    gain.gain.setValueAtTime(0.45 * settings.volume, this.ctx.currentTime);
+    gain.gain.linearRampToValueAtTime(0.01, this.ctx.currentTime + 0.38);
     osc.connect(gain);
     gain.connect(this.ctx.destination);
     osc.start();
-    osc.stop(this.ctx.currentTime + 0.35);
+    osc.stop(this.ctx.currentTime + 0.38);
   }
 }
 
 const audio = new AudioEngine();
 
-// --- CANVAS SETUP & CONSTANTS ---
+// --- CANVAS SETUP ---
 const canvas = document.getElementById('gameCanvas');
 const ctx = canvas.getContext('2d');
 
@@ -210,16 +224,26 @@ function resizeCanvas() {
 window.addEventListener('resize', resizeCanvas);
 resizeCanvas();
 
-// --- GAME STATE MANAGEMENT ---
-let gameState = 'MENU'; // MENU, SHOP, LEADERBOARD, COUNTDOWN, PLAYING, GAMEOVER
+// --- GAME STATE ---
+let gameState = 'MENU'; // MENU, SETTINGS, SHOP, LEADERBOARD, COUNTDOWN, PLAYING, PAUSED, GAMEOVER
+let previousMenuState = 'MENU'; // For returning from Settings
 let countdownTimer = 3;
 let countdownInterval = null;
 
-// Game World
+// World & Camera
 let distance = 0;
 let runMugsCollected = 0;
 let cameraY = 0;
 let screenShake = 0;
+
+// Ambient Atmosphere Snowflakes
+const ambientSnow = Array.from({ length: 45 }, () => ({
+  x: Math.random() * window.innerWidth,
+  y: Math.random() * window.innerHeight,
+  r: Math.random() * 2.5 + 1,
+  speed: Math.random() * 80 + 40,
+  drift: Math.random() * 30 - 15
+}));
 
 // Player Setup
 const player = {
@@ -235,6 +259,7 @@ const player = {
   tuckTimer: 0,
   squashX: 1,
   squashY: 1,
+  scarfWave: 0,
   reset() {
     this.x = width / 2;
     this.y = 0;
@@ -248,6 +273,7 @@ const player = {
     this.tuckTimer = 0;
     this.squashX = 1;
     this.squashY = 1;
+    this.scarfWave = 0;
   }
 };
 
@@ -262,23 +288,23 @@ let carveTrails = [];
 
 // --- PROCEDURAL GENERATION ---
 function spawnObstaclesAhead() {
-  const spawnDistance = player.y + height + 300;
-  const lastSpawnY = obstacles.length > 0 ? obstacles[obstacles.length - 1].y : player.y + 200;
+  const spawnDistance = player.y + height + 350;
+  const lastSpawnY = obstacles.length > 0 ? obstacles[obstacles.length - 1].y : player.y + 250;
 
   if (lastSpawnY < spawnDistance) {
-    const nextY = lastSpawnY + 70 + Math.random() * 50;
+    const nextY = lastSpawnY + 65 + Math.random() * 45;
     const slopeMargin = width * 0.12;
     const nextX = slopeMargin + Math.random() * (width - slopeMargin * 2);
 
     const rand = Math.random();
     let type = 'TREE';
     if (rand < 0.35) type = 'TREE';
-    else if (rand < 0.60) type = 'BOULDER';
-    else if (rand < 0.75) type = 'ICE';
-    else if (rand < 0.88) type = 'RAMP';
+    else if (rand < 0.58) type = 'BOULDER';
+    else if (rand < 0.72) type = 'ICE';
+    else if (rand < 0.86) type = 'RAMP';
     else type = 'MUG';
 
-    obstacles.push({ x: nextX, y: nextY, type, hit: false });
+    obstacles.push({ x: nextX, y: nextY, type, hit: false, steamTimer: Math.random() * 10 });
   }
 }
 
@@ -286,7 +312,7 @@ function spawnObstaclesAhead() {
 function addSnowburst(x, y, count = 12) {
   for (let i = 0; i < count; i++) {
     const ang = Math.random() * Math.PI * 2;
-    const spd = 30 + Math.random() * 120;
+    const spd = 40 + Math.random() * 140;
     particles.push({
       x, y,
       vx: Math.cos(ang) * spd,
@@ -294,7 +320,7 @@ function addSnowburst(x, y, count = 12) {
       size: 3 + Math.random() * 5,
       life: 0.4 + Math.random() * 0.4,
       maxLife: 0.8,
-      color: Math.random() < 0.5 ? '#ffffff' : '#bae6fd'
+      color: Math.random() < 0.6 ? '#ffffff' : '#bae6fd'
     });
   }
 }
@@ -308,11 +334,19 @@ function updateParticles(dt) {
     if (p.life <= 0) particles.splice(i, 1);
   }
 
-  // Fade Carve Trails
   for (let i = carveTrails.length - 1; i >= 0; i--) {
-    carveTrails[i].alpha -= dt * 0.8;
+    carveTrails[i].alpha -= dt * 0.75;
     if (carveTrails[i].alpha <= 0) carveTrails.splice(i, 1);
   }
+
+  // Update Ambient Snow
+  ambientSnow.forEach(s => {
+    s.y += (s.speed + (gameState === 'PLAYING' ? player.vy * 0.5 : 20)) * dt;
+    s.x += s.drift * dt;
+    if (s.y > height) { s.y = -10; s.x = Math.random() * width; }
+    if (s.x < 0) s.x = width;
+    if (s.x > width) s.x = 0;
+  });
 }
 
 // --- CONTROLS & INPUT ---
@@ -322,8 +356,8 @@ const SWIPE_THRESHOLD = 25;
 
 function triggerSteer(dir) {
   if (gameState !== 'PLAYING') return;
-  player.vx += dir * 220;
-  player.angle = dir * 0.35;
+  player.vx += dir * 230;
+  player.angle = dir * 0.38;
   audio.playCarve();
   addSnowburst(player.x, player.y - cameraY, 4);
 }
@@ -332,18 +366,29 @@ function triggerJump() {
   if (gameState !== 'PLAYING') return;
   if (!player.isJumping) {
     player.isJumping = true;
-    player.vz = 320;
+    player.vz = 360; // High aerial jump trajectory
     audio.playJump();
-    player.squashX = 0.8;
-    player.squashY = 1.2;
+    triggerHaptic(20);
+    player.squashX = 0.75;
+    player.squashY = 1.25;
   }
 }
 
 function triggerTuck() {
   if (gameState !== 'PLAYING') return;
   player.isTucking = true;
-  player.tuckTimer = 1.2; // 1.2s boost
+  player.tuckTimer = 1.2;
+  triggerHaptic([15, 30]);
   addSnowburst(player.x, player.y - cameraY, 8);
+}
+
+function togglePause() {
+  if (gameState === 'PLAYING') {
+    gameState = 'PAUSED';
+    audio.setRumbleVolume(0);
+  } else if (gameState === 'PAUSED') {
+    gameState = 'PLAYING';
+  }
 }
 
 window.addEventListener('touchstart', (e) => {
@@ -362,6 +407,12 @@ window.addEventListener('touchend', (e) => {
   const dx = touch.clientX - touchStartX;
   const dy = touch.clientY - touchStartY;
 
+  // HUD Pause Button Check
+  if (touchStartX > width - 60 && touchStartY < 60) {
+    togglePause();
+    return;
+  }
+
   if (Math.abs(dx) > Math.abs(dy) && Math.abs(dx) > SWIPE_THRESHOLD) {
     triggerSteer(dx > 0 ? 1 : -1);
   } else if (Math.abs(dy) > Math.abs(dx) && Math.abs(dy) > SWIPE_THRESHOLD) {
@@ -370,12 +421,15 @@ window.addEventListener('touchend', (e) => {
   }
 }, { passive: false });
 
-// Desktop Keyboard Fallback
-const keys = {};
+// Keyboard Fallback
 window.addEventListener('keydown', (e) => {
   audio.init();
   audio.resume();
-  keys[e.code] = true;
+
+  if (e.code === 'KeyP' || e.code === 'Escape') {
+    togglePause();
+    return;
+  }
 
   if (gameState === 'PLAYING') {
     if (e.code === 'ArrowLeft' || e.code === 'KeyA') triggerSteer(-1);
@@ -384,7 +438,6 @@ window.addEventListener('keydown', (e) => {
     if (e.code === 'ArrowDown' || e.code === 'KeyS') triggerTuck();
   }
 });
-window.addEventListener('keyup', (e) => { keys[e.code] = false; });
 
 // --- GAME FLOW LOGIC ---
 function startCountdown() {
@@ -411,14 +464,36 @@ function startCountdown() {
 
 function handleMenuTouch(x, y) {
   if (gameState === 'MENU') {
-    // START DESCENT Button
-    if (y > height * 0.52 && y < height * 0.60) startCountdown();
-    // SKIN SHOP Button
-    if (y > height * 0.62 && y < height * 0.70) gameState = 'SHOP';
-    // LEADERBOARD Button
-    if (y > height * 0.72 && y < height * 0.80) gameState = 'LEADERBOARD';
+    if (y > height * 0.48 && y < height * 0.56) startCountdown();
+    if (y > height * 0.58 && y < height * 0.66) gameState = 'SHOP';
+    if (y > height * 0.68 && y < height * 0.76) gameState = 'LEADERBOARD';
+    if (y > height * 0.78 && y < height * 0.86) { previousMenuState = 'MENU'; gameState = 'SETTINGS'; }
+  } else if (gameState === 'PAUSED') {
+    if (y > height * 0.38 && y < height * 0.46) gameState = 'PLAYING'; // Resume
+    if (y > height * 0.48 && y < height * 0.56) startCountdown();     // Restart
+    if (y > height * 0.58 && y < height * 0.66) { previousMenuState = 'PAUSED'; gameState = 'SETTINGS'; } // Settings
+    if (y > height * 0.68 && y < height * 0.76) gameState = 'MENU';   // Main Menu
+  } else if (gameState === 'SETTINGS') {
+    // SFX Toggle
+    if (y > height * 0.34 && y < height * 0.42) {
+      settings.sfxOn = !settings.sfxOn;
+      saveSettings();
+    }
+    // Volume Control
+    if (y > height * 0.46 && y < height * 0.54) {
+      if (x < width / 2) settings.volume = Math.max(0, settings.volume - 0.1);
+      else settings.volume = Math.min(1.0, settings.volume + 0.1);
+      saveSettings();
+    }
+    // Haptics Toggle
+    if (y > height * 0.58 && y < height * 0.66) {
+      settings.haptics = !settings.haptics;
+      triggerHaptic(30);
+      saveSettings();
+    }
+    // Back Button
+    if (y > height * 0.78) gameState = previousMenuState;
   } else if (gameState === 'SHOP') {
-    // Skin selection clicks
     let index = 0;
     for (let key in SKINS) {
       const skinY = height * 0.28 + index * 80;
@@ -432,17 +507,15 @@ function handleMenuTouch(x, y) {
           unlockedSkins.push(s.id);
           equippedSkin = s.id;
           saveState();
+          triggerHaptic([30, 50]);
         }
       }
       index++;
     }
-    // Back Button
     if (y > height * 0.84) gameState = 'MENU';
   } else if (gameState === 'LEADERBOARD') {
-    // Back Button
     if (y > height * 0.84) gameState = 'MENU';
   } else if (gameState === 'GAMEOVER') {
-    // Restart Button
     if (y > height * 0.70) startCountdown();
   }
 }
@@ -461,29 +534,32 @@ function update(dt) {
   }
 
   // Speed Scaling & Physics
-  const targetVy = (280 + distance * 0.04) * (player.isTucking ? 1.45 : 1.0);
-  player.vy += (targetVy - player.vy) * 2.0 * dt;
+  const targetVy = (280 + distance * 0.045) * (player.isTucking ? 1.5 : 1.0);
+  player.vy += (targetVy - player.vy) * 2.2 * dt;
   player.x += player.vx * dt;
   player.y += player.vy * dt;
 
-  // Horizontal damping & slope boundary clamping
-  player.vx *= 0.90;
-  player.angle *= 0.88;
+  // Steering Damping & Bounds
+  player.vx *= 0.89;
+  player.angle *= 0.86;
+  player.scarfWave += dt * 12;
+
   const margin = width * 0.08;
   if (player.x < margin) { player.x = margin; player.vx = 0; }
   if (player.x > width - margin) { player.x = width - margin; player.vx = 0; }
 
-  // Jump Z-Axis Gravity
+  // Jump Z-Axis Physics
   if (player.isJumping) {
     player.z += player.vz * dt;
-    player.vz -= 850 * dt; // Gravity
+    player.vz -= 920 * dt; // Gravity
     if (player.z <= 0) {
       player.z = 0;
       player.vz = 0;
       player.isJumping = false;
-      player.squashX = 1.3;
-      player.squashY = 0.7; // Squash on landing
-      addSnowburst(player.x, player.y - cameraY, 10);
+      player.squashX = 1.35;
+      player.squashY = 0.65;
+      addSnowburst(player.x, player.y - cameraY, 12);
+      triggerHaptic(20);
     }
   }
 
@@ -492,11 +568,11 @@ function update(dt) {
   player.squashY += (1 - player.squashY) * 8 * dt;
 
   // Carve Trail Emitter
-  if (!player.isJumping && Math.abs(player.vx) > 30) {
+  if (!player.isJumping && Math.abs(player.vx) > 25) {
     carveTrails.push({
       x: player.x,
       y: player.y,
-      alpha: 0.8,
+      alpha: 0.85,
       skinColor: SKINS[equippedSkin].suitColor
     });
   }
@@ -507,69 +583,81 @@ function update(dt) {
   if (distance > bestDistance) bestDistance = Math.floor(distance);
 
   // Avalanche Progression
-  avalancheSpeed = 260 + (distance * 0.045);
+  avalancheSpeed = 260 + (distance * 0.048);
   avalancheY += avalancheSpeed * dt;
 
   const avalancheProximity = player.y - avalancheY;
   const proximityRatio = Math.max(0, 1 - (avalancheProximity / 600));
-  screenShake = proximityRatio * 14;
+  screenShake = proximityRatio * 15;
   audio.setRumbleVolume(proximityRatio);
 
-  // Check Game Over (Caught by Avalanche)
   if (avalancheY >= player.y - 10) {
     triggerGameOver();
   }
 
-  // Procedural Spawns & Collisions
   spawnObstaclesAhead();
   updateObstaclesAndCollisions();
   updateParticles(dt);
 }
 
+// --- COLLISION LOGIC & OBSTACLE CLEARANCE ---
 function updateObstaclesAndCollisions() {
   for (let i = obstacles.length - 1; i >= 0; i--) {
     const obs = obstacles[i];
 
-    // Cleanup passed obstacles
     if (obs.y < cameraY - 200) {
       obstacles.splice(i, 1);
       continue;
     }
 
-    if (obs.hit) continue;
+    obs.steamTimer += 0.05;
 
-    // Check Collision Box
     const dx = player.x - obs.x;
     const dy = player.y - obs.y;
     const dist = Math.sqrt(dx * dx + dy * dy);
 
-    if (dist < 32) {
+    if (dist < 34) {
       if (obs.type === 'MUG') {
-        obs.hit = true;
-        cocoaMugs++;
-        runMugsCollected++;
-        audio.playPickup();
-        saveState();
+        if (!obs.hit) {
+          obs.hit = true;
+          cocoaMugs++;
+          runMugsCollected++;
+          audio.playPickup();
+          triggerHaptic([30, 30]);
+          saveState();
+        }
       } else if (obs.type === 'RAMP') {
-        obs.hit = true;
-        player.isJumping = true;
-        player.vz = 480; // High ramp launch
-        audio.playJump();
-        player.squashX = 0.7;
-        player.squashY = 1.3;
-      } else if (obs.type === 'ICE') {
-        obs.hit = true;
-        player.vx = (Math.random() < 0.5 ? 1 : -1) * 350; // Spin / slide out
-        player.angle = Math.PI * 0.5;
-        audio.playCarve();
-      } else if (obs.type === 'BOULDER' && player.z > 15) {
-        // Jumped cleanly over boulder
-      } else if (obs.type === 'TREE' || obs.type === 'BOULDER') {
-        obs.hit = true;
-        player.vy = 40; // Heavy crash slowing
-        screenShake = 22;
-        audio.playCrash();
-        addSnowburst(player.x, player.y - cameraY, 20);
+        if (!obs.hit && !player.isJumping) {
+          obs.hit = true;
+          player.isJumping = true;
+          player.vz = 580; // High launch over obstacles!
+          audio.playJump();
+          triggerHaptic(40);
+          player.squashX = 0.6;
+          player.squashY = 1.4;
+          addSnowburst(player.x, player.y - cameraY, 16);
+        }
+      } else if (player.isJumping || player.z > 18) {
+        // AERIAL OBSTACLE CLEARANCE!
+        // Player jumps completely over pine trees, boulders, and ice patches cleanly!
+      } else {
+        // Ground Collision with Obstacles
+        if (!obs.hit) {
+          if (obs.type === 'ICE') {
+            obs.hit = true;
+            player.vx = (Math.random() < 0.5 ? 1 : -1) * 380;
+            player.angle = Math.PI * 0.6;
+            audio.playCarve();
+            triggerHaptic(30);
+          } else if (obs.type === 'TREE' || obs.type === 'BOULDER') {
+            obs.hit = true;
+            player.vy = 40; // Severe speed penalty on impact
+            screenShake = 22;
+            audio.playCrash();
+            triggerHaptic([60, 40, 60]);
+            addSnowburst(player.x, player.y - cameraY, 24);
+          }
+        }
       }
     }
   }
@@ -578,17 +666,17 @@ function updateObstaclesAndCollisions() {
 function triggerGameOver() {
   gameState = 'GAMEOVER';
   audio.playCrash();
+  triggerHaptic([100, 50, 100]);
   saveState();
   setTimeout(() => {
     updateLeaderboard(distance);
   }, 100);
 }
 
-// --- RENDER ENGINE (VECTOR PATHING & JUICE) ---
+// --- RENDER ENGINE (ENHANCED VECTOR GRAPHICS & JUICE) ---
 function render() {
   ctx.clearRect(0, 0, width, height);
 
-  // Screen Shake Translation
   ctx.save();
   if (screenShake > 0.1) {
     const rx = (Math.random() - 0.5) * screenShake;
@@ -599,7 +687,7 @@ function render() {
   drawBackgroundMountains();
   drawSnowSlope();
 
-  if (gameState === 'PLAYING' || gameState === 'COUNTDOWN' || gameState === 'GAMEOVER') {
+  if (['PLAYING', 'COUNTDOWN', 'PAUSED', 'GAMEOVER'].includes(gameState)) {
     drawCarveTrails();
     drawObstacles();
     drawParticles();
@@ -607,128 +695,223 @@ function render() {
     drawAvalancheWall();
   }
 
+  drawAmbientAtmosphere();
   ctx.restore();
 
-  // Render UI Overlays (No Screen Shake)
   drawUI();
 }
 
-// 1. Parallax Alpine Peaks
+// 1. Multi-Layer Parallax Alpine Background
 function drawBackgroundMountains() {
   const skyGrad = ctx.createLinearGradient(0, 0, 0, height * 0.5);
   skyGrad.addColorStop(0, '#0284c7');
+  skyGrad.addColorStop(0.5, '#38bdf8');
   skyGrad.addColorStop(1, '#bae6fd');
   ctx.fillStyle = skyGrad;
   ctx.fillRect(0, 0, width, height);
 
-  // Distant Mountains Silhouette
-  ctx.fillStyle = '#38bdf8';
+  // Far Peaks
+  ctx.fillStyle = '#0284c7';
   ctx.beginPath();
-  const offset = (cameraY * 0.05) % 300;
-  ctx.moveTo(0, height * 0.3);
-  for (let x = -50; x < width + 100; x += 100) {
-    ctx.lineTo(x, height * 0.28 - (x % 150 === 0 ? 60 : 30));
+  const farOffset = (cameraY * 0.03) % 200;
+  ctx.moveTo(0, height * 0.28);
+  for (let x = -50; x < width + 100; x += 80) {
+    ctx.lineTo(x, height * 0.26 - (x % 120 === 0 ? 55 : 25));
   }
-  ctx.lineTo(width, height * 0.45);
-  ctx.lineTo(0, height * 0.45);
+  ctx.lineTo(width, height * 0.40);
+  ctx.lineTo(0, height * 0.40);
+  ctx.fill();
+
+  // Mid Peaks with Snow Caps
+  ctx.fillStyle = '#0369a1';
+  ctx.beginPath();
+  ctx.moveTo(0, height * 0.35);
+  for (let x = -50; x < width + 100; x += 110) {
+    ctx.lineTo(x, height * 0.30 - (x % 160 === 0 ? 70 : 35));
+  }
+  ctx.lineTo(width, height * 0.48);
+  ctx.lineTo(0, height * 0.48);
   ctx.fill();
 }
 
-// 2. Glossy Snow Slope
+// 2. Glossy Snow Slope & Boundaries
 function drawSnowSlope() {
   const slopeGrad = ctx.createLinearGradient(0, height * 0.25, 0, height);
-  slopeGrad.addColorStop(0, '#f0f9ff');
-  slopeGrad.addColorStop(1, '#e0f2fe');
+  slopeGrad.addColorStop(0, '#f8fafc');
+  slopeGrad.addColorStop(0.6, '#e2e8f0');
+  slopeGrad.addColorStop(1, '#cbd5e1');
   ctx.fillStyle = slopeGrad;
   ctx.fillRect(0, height * 0.25, width, height);
 
-  // Slope Boundary Trees
-  ctx.fillStyle = '#065f46';
+  // Side Slope Boundaries (Dark Alpine Forest Walls)
   const margin = width * 0.08;
+  const treeGradLeft = ctx.createLinearGradient(0, 0, margin, 0);
+  treeGradLeft.addColorStop(0, '#022c22');
+  treeGradLeft.addColorStop(1, '#065f46');
+  ctx.fillStyle = treeGradLeft;
   ctx.fillRect(0, 0, margin, height);
+
+  const treeGradRight = ctx.createLinearGradient(width - margin, 0, width, 0);
+  treeGradRight.addColorStop(0, '#065f46');
+  treeGradRight.addColorStop(1, '#022c22');
+  ctx.fillStyle = treeGradRight;
   ctx.fillRect(width - margin, 0, margin, height);
 }
 
-// 3. Carve Trails
+// 3. Dynamic Carve Trails
 function drawCarveTrails() {
   carveTrails.forEach(t => {
     ctx.save();
-    ctx.globalAlpha = t.alpha * 0.5;
+    ctx.globalAlpha = t.alpha * 0.6;
     ctx.fillStyle = t.skinColor;
     ctx.beginPath();
-    ctx.arc(t.x, t.y - cameraY, 3, 0, Math.PI * 2);
+    ctx.arc(t.x - 3, t.y - cameraY, 2.5, 0, Math.PI * 2);
+    ctx.arc(t.x + 3, t.y - cameraY, 2.5, 0, Math.PI * 2);
     ctx.fill();
     ctx.restore();
   });
 }
 
-// 4. Vector Obstacles
+// 4. Stylized Vector Obstacles
 function drawObstacles() {
   obstacles.forEach(obs => {
     const screenY = obs.y - cameraY;
-    if (screenY < -50 || screenY > height + 50) return;
+    if (screenY < -60 || screenY > height + 60) return;
 
     if (obs.type === 'TREE') {
-      // Pine Tree
-      ctx.fillStyle = '#334155'; // Trunk
-      ctx.fillRect(obs.x - 3, screenY - 5, 6, 12);
-      ctx.fillStyle = '#065f46'; // Foliage
+      // Drop Shadow
+      ctx.fillStyle = 'rgba(15, 23, 42, 0.2)';
       ctx.beginPath();
-      ctx.moveTo(obs.x, screenY - 35);
-      ctx.lineTo(obs.x - 18, screenY - 5);
-      ctx.lineTo(obs.x + 18, screenY - 5);
+      ctx.ellipse(obs.x, screenY + 6, 20, 8, 0, 0, Math.PI * 2);
       ctx.fill();
-      ctx.fillStyle = '#047857'; // High tier
-      ctx.beginPath();
-      ctx.moveTo(obs.x, screenY - 45);
-      ctx.lineTo(obs.x - 12, screenY - 20);
-      ctx.lineTo(obs.x + 12, screenY - 20);
-      ctx.fill();
+
+      // Pine Trunk
+      ctx.fillStyle = '#1e293b';
+      ctx.fillRect(obs.x - 4, screenY - 6, 8, 14);
+
+      // Multi-Layered Snow Pine Foliage
+      const layers = [
+        { y: screenY - 8, w: 22, h: 22, col: '#065f46' },
+        { y: screenY - 22, w: 17, h: 20, col: '#047857' },
+        { y: screenY - 36, w: 12, h: 18, col: '#10b981' }
+      ];
+      layers.forEach(l => {
+        ctx.fillStyle = l.col;
+        ctx.beginPath();
+        ctx.moveTo(obs.x, l.y - l.h);
+        ctx.lineTo(obs.x - l.w, l.y);
+        ctx.lineTo(obs.x + l.w, l.y);
+        ctx.fill();
+
+        // Snow Clumps on Branches
+        ctx.fillStyle = '#f8fafc';
+        ctx.beginPath();
+        ctx.moveTo(obs.x, l.y - l.h);
+        ctx.lineTo(obs.x - l.w * 0.5, l.y - l.h * 0.5);
+        ctx.lineTo(obs.x + l.w * 0.5, l.y - l.h * 0.5);
+        ctx.fill();
+      });
+
     } else if (obs.type === 'BOULDER') {
-      // Slate Grey Boulder
+      // Poly-Shaded Boulder
+      ctx.fillStyle = 'rgba(15, 23, 42, 0.25)';
+      ctx.beginPath();
+      ctx.ellipse(obs.x, screenY + 4, 18, 8, 0, 0, Math.PI * 2);
+      ctx.fill();
+
       ctx.fillStyle = '#334155';
       ctx.beginPath();
-      ctx.ellipse(obs.x, screenY, 16, 12, 0, 0, Math.PI * 2);
+      ctx.ellipse(obs.x, screenY, 18, 13, 0, 0, Math.PI * 2);
       ctx.fill();
-      ctx.fillStyle = '#cbd5e1'; // Snow Cap
+
+      // Specular Rim Highlight
+      ctx.fillStyle = '#64748b';
       ctx.beginPath();
-      ctx.ellipse(obs.x - 3, screenY - 4, 9, 5, 0, 0, Math.PI * 2);
+      ctx.ellipse(obs.x - 4, screenY - 3, 10, 6, -0.2, 0, Math.PI * 2);
       ctx.fill();
+
+      // Snow Cap
+      ctx.fillStyle = '#f1f5f9';
+      ctx.beginPath();
+      ctx.ellipse(obs.x - 2, screenY - 6, 12, 5, 0, 0, Math.PI * 2);
+      ctx.fill();
+
     } else if (obs.type === 'ICE') {
       // Glossy Ice Patch
-      ctx.fillStyle = 'rgba(56, 189, 248, 0.45)';
+      ctx.fillStyle = 'rgba(56, 189, 248, 0.55)';
       ctx.beginPath();
-      ctx.ellipse(obs.x, screenY, 24, 14, 0.2, 0, Math.PI * 2);
+      ctx.ellipse(obs.x, screenY, 26, 14, 0.15, 0, Math.PI * 2);
       ctx.fill();
+
       ctx.strokeStyle = '#ffffff';
-      ctx.lineWidth = 1.5;
+      ctx.lineWidth = 2;
       ctx.stroke();
+
+      // Glare Reflection
+      ctx.strokeStyle = 'rgba(255, 255, 255, 0.8)';
+      ctx.beginPath();
+      ctx.moveTo(obs.x - 12, screenY - 2);
+      ctx.lineTo(obs.x + 8, screenY - 4);
+      ctx.stroke();
+
     } else if (obs.type === 'RAMP') {
-      // Natural Snow Ramp
+      // Kicker Ramp
+      ctx.fillStyle = 'rgba(15, 23, 42, 0.2)';
+      ctx.beginPath();
+      ctx.ellipse(obs.x, screenY + 8, 22, 6, 0, 0, Math.PI * 2);
+      ctx.fill();
+
       ctx.fillStyle = '#bae6fd';
       ctx.beginPath();
-      ctx.moveTo(obs.x - 20, screenY + 10);
-      ctx.lineTo(obs.x + 20, screenY + 10);
-      ctx.lineTo(obs.x, screenY - 12);
+      ctx.moveTo(obs.x - 22, screenY + 10);
+      ctx.lineTo(obs.x + 22, screenY + 10);
+      ctx.lineTo(obs.x, screenY - 14);
       ctx.fill();
-      ctx.fillStyle = '#f59e0b'; // Directional Arrow
-      ctx.fillRect(obs.x - 2, screenY - 2, 4, 8);
+
+      ctx.fillStyle = '#0284c7';
+      ctx.beginPath();
+      ctx.moveTo(obs.x - 18, screenY + 8);
+      ctx.lineTo(obs.x + 18, screenY + 8);
+      ctx.lineTo(obs.x, screenY - 10);
+      ctx.fill();
+
+      // Yellow Directional Arrows
+      ctx.fillStyle = '#f59e0b';
+      ctx.beginPath();
+      ctx.moveTo(obs.x, screenY - 6);
+      ctx.lineTo(obs.x - 5, screenY + 2);
+      ctx.lineTo(obs.x + 5, screenY + 2);
+      ctx.fill();
+
     } else if (obs.type === 'MUG') {
       // Hot Cocoa Mug
-      ctx.fillStyle = '#ef4444'; // Red Mug
+      ctx.fillStyle = '#ef4444';
       ctx.fillRect(obs.x - 8, screenY - 8, 16, 16);
-      ctx.fillStyle = '#78350f'; // Cocoa Surface
+      ctx.fillStyle = '#78350f';
       ctx.fillRect(obs.x - 6, screenY - 6, 12, 4);
-      ctx.strokeStyle = '#ffffff'; // Steam
+
+      // Mug Handle
+      ctx.strokeStyle = '#ef4444';
+      ctx.lineWidth = 2.5;
       ctx.beginPath();
-      ctx.moveTo(obs.x - 2, screenY - 10);
-      ctx.lineTo(obs.x - 2, screenY - 15);
+      ctx.arc(obs.x + 9, screenY, 4, -Math.PI * 0.5, Math.PI * 0.5);
+      ctx.stroke();
+
+      // Animated Steam Particles
+      ctx.strokeStyle = 'rgba(255, 255, 255, 0.7)';
+      ctx.lineWidth = 1.5;
+      const steamY = screenY - 10 - Math.sin(obs.steamTimer) * 4;
+      ctx.beginPath();
+      ctx.moveTo(obs.x - 3, steamY);
+      ctx.lineTo(obs.x - 3, steamY - 6);
+      ctx.moveTo(obs.x + 3, steamY - 2);
+      ctx.lineTo(obs.x + 3, steamY - 8);
       ctx.stroke();
     }
   });
 }
 
-// 5. Player Vector Character
+// 5. Player Vector Character & Dynamic Scarf
 function drawPlayer() {
   const screenY = player.y - cameraY - player.z;
   const currentSkin = SKINS[equippedSkin];
@@ -738,54 +921,72 @@ function drawPlayer() {
   ctx.rotate(player.angle);
   ctx.scale(player.squashX, player.squashY);
 
-  // Drop Shadow based on Height Z
-  ctx.fillStyle = 'rgba(0, 0, 0, 0.25)';
+  // Dynamic Shadow (Detaches and expands when jumping high)
+  const shadowScale = 1 + player.z * 0.003;
+  ctx.fillStyle = 'rgba(15, 23, 42, 0.28)';
   ctx.beginPath();
-  ctx.ellipse(0, 12 + player.z * 0.5, 14, 6, 0, 0, Math.PI * 2);
+  ctx.ellipse(0, 14 + player.z * 0.7, 14 * shadowScale, 5 * shadowScale, 0, 0, Math.PI * 2);
   ctx.fill();
 
-  // Skis / Snowboard
+  // Skis
   ctx.fillStyle = currentSkin.accentColor;
-  ctx.fillRect(-8, -16, 4, 32);
-  ctx.fillRect(4, -16, 4, 32);
+  ctx.fillRect(-9, -18, 4, 34);
+  ctx.fillRect(5, -18, 4, 34);
+
+  // Waving Scarf Physics Behind Player
+  const wave = Math.sin(player.scarfWave) * 6;
+  ctx.fillStyle = currentSkin.scarfColor;
+  ctx.beginPath();
+  ctx.moveTo(0, 2);
+  ctx.quadraticCurveTo(-10 + wave, 14, -6 + wave, 24);
+  ctx.quadraticCurveTo(0, 14, 0, 2);
+  ctx.fill();
 
   // Suit Body
   ctx.fillStyle = currentSkin.suitColor;
   ctx.beginPath();
-  ctx.arc(0, 0, 10, 0, Math.PI * 2);
+  ctx.arc(0, 0, 11, 0, Math.PI * 2);
   ctx.fill();
 
-  // Helmet / Goggles
+  // Helmet / Visor Reflection
   ctx.fillStyle = '#0f172a';
   ctx.beginPath();
-  ctx.arc(0, -2, 6, 0, Math.PI * 2);
+  ctx.arc(0, -2, 7, 0, Math.PI * 2);
   ctx.fill();
-  ctx.fillStyle = '#38bdf8'; // Goggles
-  ctx.fillRect(-4, -4, 8, 3);
+
+  ctx.fillStyle = '#38bdf8'; // Visor
+  ctx.fillRect(-5, -5, 10, 4);
 
   ctx.restore();
 }
 
-// 6. Roaring Avalanche Snow Wall
+// 6. Roaring Volumetric Avalanche Wall
 function drawAvalancheWall() {
   const wallScreenY = avalancheY - cameraY;
-  if (wallScreenY < -100) return;
+  if (wallScreenY < -120) return;
 
-  const grad = ctx.createLinearGradient(0, wallScreenY - 80, 0, wallScreenY + 40);
-  grad.addColorStop(0, 'rgba(241, 245, 249, 0.98)');
-  grad.addColorStop(0.6, 'rgba(203, 213, 225, 0.92)');
+  // Warning Red Screen Tint if avalanche is close
+  const prox = Math.max(0, 1 - ((player.y - avalancheY) / 500));
+  if (prox > 0.6) {
+    ctx.fillStyle = `rgba(239, 68, 68, ${ (prox - 0.6) * 0.4 })`;
+    ctx.fillRect(0, 0, width, height);
+  }
+
+  // Volumetric Powder Wave
+  const grad = ctx.createLinearGradient(0, wallScreenY - 100, 0, wallScreenY + 60);
+  grad.addColorStop(0, 'rgba(248, 250, 252, 0.98)');
+  grad.addColorStop(0.5, 'rgba(226, 232, 240, 0.94)');
   grad.addColorStop(1, 'rgba(148, 163, 184, 0.0)');
 
   ctx.fillStyle = grad;
   ctx.beginPath();
   ctx.moveTo(0, 0);
   ctx.lineTo(width, 0);
-  ctx.lineTo(width, wallScreenY + 20);
+  ctx.lineTo(width, wallScreenY + 30);
 
-  // Roaring Wave Arcs
-  const time = Date.now() * 0.005;
-  for (let x = width; x >= 0; x -= 40) {
-    const wave = Math.sin(x * 0.02 + time) * 18;
+  const time = Date.now() * 0.006;
+  for (let x = width; x >= 0; x -= 30) {
+    const wave = Math.sin(x * 0.02 + time) * 22;
     ctx.lineTo(x, wallScreenY + wave);
   }
   ctx.closePath();
@@ -795,7 +996,7 @@ function drawAvalancheWall() {
 function drawParticles() {
   particles.forEach(p => {
     ctx.save();
-    ctx.globalAlpha = p.life / p.maxLife;
+    ctx.globalAlpha = Math.max(0, p.life / p.maxLife);
     ctx.fillStyle = p.color;
     ctx.beginPath();
     ctx.arc(p.x, p.y, p.size, 0, Math.PI * 2);
@@ -804,13 +1005,21 @@ function drawParticles() {
   });
 }
 
-// --- UI & MENUS ---
+function drawAmbientAtmosphere() {
+  ctx.fillStyle = '#ffffff';
+  ambientSnow.forEach(s => {
+    ctx.beginPath();
+    ctx.arc(s.x, s.y, s.r, 0, Math.PI * 2);
+    ctx.fill();
+  });
+}
+
+// --- UI & MENUS OVERLAY ---
 function drawUI() {
   ctx.textAlign = 'center';
 
   if (gameState === 'MENU') {
-    // Title Overlay
-    ctx.fillStyle = 'rgba(2, 132, 199, 0.85)';
+    ctx.fillStyle = 'rgba(15, 23, 42, 0.85)';
     ctx.fillRect(0, 0, width, height);
 
     ctx.fillStyle = '#ffffff';
@@ -819,12 +1028,38 @@ function drawUI() {
 
     ctx.fillStyle = '#f59e0b';
     ctx.font = '700 16px system-ui, sans-serif';
-    ctx.fillText(`PERSONAL BEST: ${bestDistance}m  |  MUGS: ☕ ${cocoaMugs}`, width / 2, height * 0.30);
+    ctx.fillText(`BEST DISTANCE: ${bestDistance}m  |  MUGS: ☕ ${cocoaMugs}`, width / 2, height * 0.30);
 
-    // Menu Buttons
-    drawButton('START DESCENT', height * 0.52, '#10b981');
-    drawButton('SKIN SHOP', height * 0.62, '#0284c7');
-    drawButton('LEADERBOARD', height * 0.72, '#3b82f6');
+    drawButton('START DESCENT', height * 0.48, '#10b981');
+    drawButton('SKIN SHOP', height * 0.58, '#0284c7');
+    drawButton('LEADERBOARD', height * 0.68, '#3b82f6');
+    drawButton('SETTINGS', height * 0.78, '#64748b');
+
+  } else if (gameState === 'PAUSED') {
+    ctx.fillStyle = 'rgba(15, 23, 42, 0.88)';
+    ctx.fillRect(0, 0, width, height);
+
+    ctx.fillStyle = '#38bdf8';
+    ctx.font = '900 36px system-ui, sans-serif';
+    ctx.fillText('GAME PAUSED', width / 2, height * 0.25);
+
+    drawButton('RESUME', height * 0.38, '#10b981');
+    drawButton('RESTART', height * 0.48, '#0284c7');
+    drawButton('SETTINGS', height * 0.58, '#64748b');
+    drawButton('MAIN MENU', height * 0.68, '#ef4444');
+
+  } else if (gameState === 'SETTINGS') {
+    ctx.fillStyle = 'rgba(15, 23, 42, 0.92)';
+    ctx.fillRect(0, 0, width, height);
+
+    ctx.fillStyle = '#ffffff';
+    ctx.font = '800 28px system-ui, sans-serif';
+    ctx.fillText('GAME SETTINGS', width / 2, height * 0.20);
+
+    drawButton(`SOUND EFFECTS: ${settings.sfxOn ? 'ON' : 'OFF'}`, height * 0.34, settings.sfxOn ? '#10b981' : '#64748b');
+    drawButton(`SFX VOLUME: ${Math.round(settings.volume * 100)}%`, height * 0.46, '#0284c7');
+    drawButton(`HAPTIC FEEDBACK: ${settings.haptics ? 'ON' : 'OFF'}`, height * 0.58, settings.haptics ? '#10b981' : '#64748b');
+    drawButton('BACK', height * 0.78, '#475569');
 
   } else if (gameState === 'SHOP') {
     ctx.fillStyle = 'rgba(15, 23, 42, 0.92)';
@@ -901,19 +1136,21 @@ function drawUI() {
     ctx.fillText(countdownTimer > 0 ? countdownTimer : 'GO!', width / 2, height / 2);
 
   } else if (gameState === 'PLAYING') {
-    // Heads Up Display (HUD)
+    // HUD Distance & Cocoa Mugs
     ctx.textAlign = 'left';
     ctx.fillStyle = '#0f172a';
     ctx.font = '800 16px system-ui, sans-serif';
     ctx.fillText(`DISTANCE: ${Math.floor(distance)}m`, 20, 40);
     ctx.fillText(`☕ ${runMugsCollected}`, 20, 65);
 
-    // Avalanche Warning Bar
-    const prox = Math.max(0, 1 - ((player.y - avalancheY) / 600));
-    ctx.fillStyle = 'rgba(15, 23, 42, 0.4)';
-    ctx.fillRect(width - 140, 25, 120, 14);
-    ctx.fillStyle = prox > 0.75 ? '#ef4444' : '#f59e0b';
-    ctx.fillRect(width - 140, 25, 120 * prox, 14);
+    // Pause HUD Button (⏸ Icon)
+    ctx.fillStyle = 'rgba(15, 23, 42, 0.6)';
+    ctx.beginPath();
+    ctx.arc(width - 35, 35, 20, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.fillStyle = '#ffffff';
+    ctx.fillRect(width - 40, 26, 4, 18);
+    ctx.fillRect(width - 34, 26, 4, 18);
 
   } else if (gameState === 'GAMEOVER') {
     ctx.fillStyle = 'rgba(15, 23, 42, 0.88)';
@@ -937,6 +1174,7 @@ function drawButton(text, y, color) {
   ctx.fillRect(width * 0.15, y, width * 0.7, 50);
   ctx.fillStyle = '#ffffff';
   ctx.font = '800 16px system-ui, sans-serif';
+  ctx.textAlign = 'center';
   ctx.fillText(text, width / 2, y + 31);
 }
 
