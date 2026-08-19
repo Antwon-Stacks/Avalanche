@@ -60,6 +60,13 @@ const SKINS = {
   gold: { id: 'gold', name: 'Golden Summit', cost: 75, suitColor: '#eab308', scarfColor: '#ffffff', accentColor: '#0f172a' }
 };
 
+// In-Game Arcade High Score Initials Selector State
+let isHighScoreRun = false;
+let initialsIndices = [18, 10, 8]; // 'S', 'K', 'I'
+let activeInitialSlot = 0;
+let scoreSubmitted = false;
+const ALPHABET = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789'.split('');
+
 function saveState() {
   localStorage.setItem(STORAGE_PREFIX + 'best', bestDistance);
   localStorage.setItem(STORAGE_PREFIX + 'mugs', cocoaMugs);
@@ -75,19 +82,18 @@ function triggerHaptic(pattern) {
   }
 }
 
-function updateLeaderboard(newDist) {
+function checkHighScore(newDist) {
   if (newDist <= 0) return false;
-  const isTop10 = leaderboard.length < 10 || newDist > leaderboard[leaderboard.length - 1].distance;
-  if (isTop10) {
-    let initials = prompt('NEW HIGH SCORE! Enter 3 Initials:', 'SKI');
-    initials = initials ? initials.substring(0, 3).toUpperCase() : 'SKI';
-    leaderboard.push({ initials, distance: Math.floor(newDist) });
-    leaderboard.sort((a, b) => b.distance - a.distance);
-    if (leaderboard.length > 10) leaderboard.pop();
-    saveState();
-    return true;
-  }
-  return false;
+  return leaderboard.length < 10 || newDist > leaderboard[leaderboard.length - 1].distance;
+}
+
+function submitHighScore(newDist) {
+  const chosenInitials = initialsIndices.map(idx => ALPHABET[idx]).join('');
+  leaderboard.push({ initials: chosenInitials, distance: Math.floor(newDist) });
+  leaderboard.sort((a, b) => b.distance - a.distance);
+  if (leaderboard.length > 10) leaderboard.pop();
+  scoreSubmitted = true;
+  saveState();
 }
 
 // --- SYNTHESIZED WEB AUDIO ENGINE ---
@@ -176,7 +182,7 @@ class AudioEngine {
 
   playPickup() {
     if (!this.ctx || !settings.sfxOn) return;
-    const notes = [523.25, 659.25, 783.99, 1046.50]; // C5, E5, G5, C6
+    const notes = [523.25, 659.25, 783.99, 1046.50];
     notes.forEach((freq, idx) => {
       const osc = this.ctx.createOscillator();
       const gain = this.ctx.createGain();
@@ -205,6 +211,21 @@ class AudioEngine {
     gain.connect(this.ctx.destination);
     osc.start();
     osc.stop(this.ctx.currentTime + 0.38);
+  }
+
+  playClick() {
+    if (!this.ctx || !settings.sfxOn) return;
+    const osc = this.ctx.createOscillator();
+    const gain = this.ctx.createGain();
+    osc.type = 'sine';
+    osc.frequency.setValueAtTime(400, this.ctx.currentTime);
+    osc.frequency.exponentialRampToValueAtTime(200, this.ctx.currentTime + 0.04);
+    gain.gain.setValueAtTime(0.15 * settings.volume, this.ctx.currentTime);
+    gain.gain.linearRampToValueAtTime(0.01, this.ctx.currentTime + 0.04);
+    osc.connect(gain);
+    gain.connect(this.ctx.destination);
+    osc.start();
+    osc.stop(this.ctx.currentTime + 0.04);
   }
 }
 
@@ -369,7 +390,7 @@ function triggerJump() {
   if (gameState !== 'PLAYING') return;
   if (!player.isJumping) {
     player.isJumping = true;
-    player.vz = 370; // High jump trajectory
+    player.vz = 370;
     audio.playJump();
     triggerHaptic(20);
     player.squashX = 0.75;
@@ -388,13 +409,13 @@ function triggerTuck() {
 function togglePause() {
   if (gameState === 'PLAYING') {
     gameState = 'PAUSED';
+    screenShake = 0; // Clear screen shake on pause
     audio.setRumbleVolume(0);
   } else if (gameState === 'PAUSED') {
     gameState = 'PLAYING';
   }
 }
 
-// Touch Event Listeners for Tap & Hold + Swipe Support
 window.addEventListener('touchstart', (e) => {
   audio.init();
   audio.resume();
@@ -441,7 +462,7 @@ window.addEventListener('touchend', (e) => {
   }
 }, { passive: false });
 
-// Keyboard Fallback (Desktop)
+// Keyboard Fallback
 const keys = {};
 window.addEventListener('keydown', (e) => {
   audio.init();
@@ -465,6 +486,7 @@ window.addEventListener('keyup', (e) => { keys[e.code] = false; });
 // --- GAME FLOW LOGIC ---
 function startCountdown() {
   gameState = 'COUNTDOWN';
+  screenShake = 0; // Fix screen shake bug on restart!
   countdownTimer = 3;
   player.reset();
   avalancheY = -400;
@@ -472,6 +494,8 @@ function startCountdown() {
   distance = 0;
   runMugsCollected = 0;
   timeAlive = 0;
+  isHighScoreRun = false;
+  scoreSubmitted = false;
   obstacles = [];
   particles = [];
   carveTrails = [];
@@ -496,7 +520,7 @@ function handleMenuTouch(x, y) {
     if (y > height * 0.38 && y < height * 0.46) gameState = 'PLAYING';
     if (y > height * 0.48 && y < height * 0.56) startCountdown();
     if (y > height * 0.58 && y < height * 0.66) { previousMenuState = 'PAUSED'; gameState = 'SETTINGS'; }
-    if (y > height * 0.68 && y < height * 0.76) gameState = 'MENU';
+    if (y > height * 0.68 && y < height * 0.76) { screenShake = 0; gameState = 'MENU'; }
   } else if (gameState === 'SETTINGS') {
     if (y > height * 0.34 && y < height * 0.42) {
       settings.sfxOn = !settings.sfxOn;
@@ -536,7 +560,48 @@ function handleMenuTouch(x, y) {
   } else if (gameState === 'LEADERBOARD') {
     if (y > height * 0.84) gameState = 'MENU';
   } else if (gameState === 'GAMEOVER') {
-    if (y > height * 0.70) startCountdown();
+    // In-Canvas Arcade Initials Entry Controls
+    if (isHighScoreRun && !scoreSubmitted) {
+      const slotWidth = 50;
+      const startX = width / 2 - 80;
+      const pickerY = height * 0.54;
+
+      for (let i = 0; i < 3; i++) {
+        const slotX = startX + i * 55;
+        // Up Arrow Click
+        if (x > slotX && x < slotX + slotWidth && y > pickerY - 35 && y < pickerY - 5) {
+          initialsIndices[i] = (initialsIndices[i] + 1) % ALPHABET.length;
+          activeInitialSlot = i;
+          audio.playClick();
+          return;
+        }
+        // Down Arrow Click
+        if (x > slotX && x < slotX + slotWidth && y > pickerY + 45 && y < pickerY + 75) {
+          initialsIndices[i] = (initialsIndices[i] - 1 + ALPHABET.length) % ALPHABET.length;
+          activeInitialSlot = i;
+          audio.playClick();
+          return;
+        }
+        // Direct Slot Tap
+        if (x > slotX && x < slotX + slotWidth && y > pickerY && y < pickerY + 40) {
+          initialsIndices[i] = (initialsIndices[i] + 1) % ALPHABET.length;
+          activeInitialSlot = i;
+          audio.playClick();
+          return;
+        }
+      }
+
+      // Submit Score Button
+      if (y > height * 0.68 && y < height * 0.75) {
+        submitHighScore(distance);
+        audio.playPickup();
+        return;
+      }
+    } else {
+      // Action Buttons when High Score submitted or normal run ended
+      if (y > height * 0.62 && y < height * 0.70) startCountdown(); // Restart
+      if (y > height * 0.72 && y < height * 0.80) { screenShake = 0; gameState = 'MENU'; } // Main Menu
+    }
   }
 }
 
@@ -549,28 +614,25 @@ function update(dt) {
 
   timeAlive += dt;
 
-  // Tap & Hold Continuous Steering Logic
+  // Tap & Hold Steering
   if (isPointerDown) {
     if (pointerCurrentX < width * 0.42) {
-      player.vx -= 480 * dt; // Hold Left
+      player.vx -= 480 * dt;
       player.angle = -0.32;
     } else if (pointerCurrentX > width * 0.58) {
-      player.vx += 480 * dt; // Hold Right
+      player.vx += 480 * dt;
       player.angle = 0.32;
     }
   }
 
-  // Keyboard Continuous Steering Fallback
   if (keys['ArrowLeft'] || keys['KeyA']) { player.vx -= 480 * dt; player.angle = -0.32; }
   if (keys['ArrowRight'] || keys['KeyD']) { player.vx += 480 * dt; player.angle = 0.32; }
 
-  // Tuck Speed Boost Timer
   if (player.isTucking) {
     player.tuckTimer -= dt;
     if (player.tuckTimer <= 0) player.isTucking = false;
   }
 
-  // Downhill Physics Engine
   const targetVy = (280 + distance * 0.045) * (player.isTucking ? 1.5 : 1.0);
   player.vy += (targetVy - player.vy) * 2.2 * dt;
   player.x += player.vx * dt;
@@ -584,10 +646,9 @@ function update(dt) {
   if (player.x < margin) { player.x = margin; player.vx = 0; }
   if (player.x > width - margin) { player.x = width - margin; player.vx = 0; }
 
-  // Jump Z-Axis Trajectory & Gravity
   if (player.isJumping) {
     player.z += player.vz * dt;
-    player.vz -= 920 * dt; // Gravity
+    player.vz -= 920 * dt;
     if (player.z <= 0) {
       player.z = 0;
       player.vz = 0;
@@ -615,7 +676,6 @@ function update(dt) {
   distance = player.y / 10;
   if (distance > bestDistance) bestDistance = Math.floor(distance);
 
-  // Avalanche Progression
   avalancheSpeed = 260 + (distance * 0.048);
   avalancheY += avalancheSpeed * dt;
 
@@ -633,7 +693,6 @@ function update(dt) {
   updateParticles(dt);
 }
 
-// --- COLLISION LOGIC & ITEM PICKUP FIX ---
 function updateObstaclesAndCollisions() {
   for (let i = obstacles.length - 1; i >= 0; i--) {
     const obs = obstacles[i];
@@ -652,19 +711,19 @@ function updateObstaclesAndCollisions() {
     if (dist < 34) {
       if (obs.type === 'MUG') {
         if (!obs.hit) {
-          obs.hit = true; // Mark as collected immediately!
+          obs.hit = true;
           cocoaMugs++;
           runMugsCollected++;
           audio.playPickup();
           triggerHaptic([30, 30]);
-          addSnowburst(player.x, player.y - cameraY, 15, '#eab308'); // Golden starburst
+          addSnowburst(player.x, player.y - cameraY, 15, '#eab308');
           saveState();
         }
       } else if (obs.type === 'RAMP') {
         if (!obs.hit && !player.isJumping) {
           obs.hit = true;
           player.isJumping = true;
-          player.vz = 580; // High aerial launch over obstacles!
+          player.vz = 580;
           audio.playJump();
           triggerHaptic(40);
           player.squashX = 0.6;
@@ -672,7 +731,7 @@ function updateObstaclesAndCollisions() {
           addSnowburst(player.x, player.y - cameraY, 16);
         }
       } else if (player.isJumping || player.z > 18) {
-        // AERIAL OBSTACLE CLEARANCE: Fly cleanly over pine trees, boulders, and ice!
+        // Clear obstacle cleanly in mid-air
       } else {
         if (!obs.hit) {
           if (obs.type === 'ICE') {
@@ -697,20 +756,20 @@ function updateObstaclesAndCollisions() {
 
 function triggerGameOver() {
   gameState = 'GAMEOVER';
+  screenShake = 0; // Instantly zero out residual screen shake!
   audio.playCrash();
   triggerHaptic([100, 50, 100]);
+  isHighScoreRun = checkHighScore(distance);
+  scoreSubmitted = false;
   saveState();
-  setTimeout(() => {
-    updateLeaderboard(distance);
-  }, 100);
 }
 
-// --- ADVANCED GRAPHICS ENGINE ---
+// --- ADVANCED RENDER ENGINE ---
 function render() {
   ctx.clearRect(0, 0, width, height);
 
   ctx.save();
-  if (screenShake > 0.1) {
+  if (screenShake > 0.1 && gameState === 'PLAYING') {
     const rx = (Math.random() - 0.5) * screenShake;
     const ry = (Math.random() - 0.5) * screenShake;
     ctx.translate(rx, ry);
@@ -734,7 +793,7 @@ function render() {
   drawUI();
 }
 
-// 1. Dynamic Aurora Borealis Sky
+// 1. Dynamic Aurora Sky
 function drawAuroraSky() {
   const skyGrad = ctx.createLinearGradient(0, 0, 0, height * 0.45);
   skyGrad.addColorStop(0, '#0f172a');
@@ -743,7 +802,6 @@ function drawAuroraSky() {
   ctx.fillStyle = skyGrad;
   ctx.fillRect(0, 0, width, height);
 
-  // Aurora Borealis Curtains
   ctx.save();
   ctx.globalAlpha = 0.35;
   const time = timeAlive * 0.5;
@@ -764,7 +822,7 @@ function drawAuroraSky() {
   ctx.restore();
 }
 
-// 2. Glossy Snow Slope & Side Forests
+// 2. Snow Slope
 function drawSnowSlope() {
   const slopeGrad = ctx.createLinearGradient(0, height * 0.25, 0, height);
   slopeGrad.addColorStop(0, '#f8fafc');
@@ -787,7 +845,7 @@ function drawSnowSlope() {
   ctx.fillRect(width - margin, 0, margin, height);
 }
 
-// 3. Dynamic Carve Trails
+// 3. Carve Trails
 function drawCarveTrails() {
   carveTrails.forEach(t => {
     ctx.save();
@@ -801,10 +859,9 @@ function drawCarveTrails() {
   });
 }
 
-// 4. Stylized High-Detail Vector Obstacles (With Mug Bug Fix!)
+// 4. Vector Obstacles
 function drawObstacles() {
   obstacles.forEach(obs => {
-    // FIX: Hide Mug immediately when picked up!
     if (obs.hit && obs.type === 'MUG') return;
 
     const screenY = obs.y - cameraY;
@@ -905,27 +962,23 @@ function drawObstacles() {
       ctx.fill();
 
     } else if (obs.type === 'MUG') {
-      // Golden Aura Glow Around Collectible
       ctx.save();
       ctx.fillStyle = 'rgba(234, 179, 8, 0.35)';
       ctx.beginPath();
       ctx.arc(obs.x, screenY, 18, 0, Math.PI * 2);
       ctx.fill();
 
-      // Red Ceramic Mug Body
       ctx.fillStyle = '#ef4444';
       ctx.fillRect(obs.x - 8, screenY - 8, 16, 16);
       ctx.fillStyle = '#78350f';
       ctx.fillRect(obs.x - 6, screenY - 6, 12, 4);
 
-      // Handle
       ctx.strokeStyle = '#ef4444';
       ctx.lineWidth = 2.5;
       ctx.beginPath();
       ctx.arc(obs.x + 9, screenY, 4, -Math.PI * 0.5, Math.PI * 0.5);
       ctx.stroke();
 
-      // Steam Particles
       ctx.strokeStyle = 'rgba(255, 255, 255, 0.8)';
       ctx.lineWidth = 1.5;
       const steamY = screenY - 10 - Math.sin(obs.steamTimer) * 4;
@@ -956,12 +1009,10 @@ function drawPlayer() {
   ctx.ellipse(0, 14 + player.z * 0.7, 14 * shadowScale, 5 * shadowScale, 0, 0, Math.PI * 2);
   ctx.fill();
 
-  // Skis
   ctx.fillStyle = currentSkin.accentColor;
   ctx.fillRect(-9, -18, 4, 34);
   ctx.fillRect(5, -18, 4, 34);
 
-  // Waving Scarf Physics
   const wave = Math.sin(player.scarfWave) * 6;
   ctx.fillStyle = currentSkin.scarfColor;
   ctx.beginPath();
@@ -970,13 +1021,11 @@ function drawPlayer() {
   ctx.quadraticCurveTo(0, 14, 0, 2);
   ctx.fill();
 
-  // Suit Body
   ctx.fillStyle = currentSkin.suitColor;
   ctx.beginPath();
   ctx.arc(0, 0, 11, 0, Math.PI * 2);
   ctx.fill();
 
-  // Helmet & Visor Sun Glare
   ctx.fillStyle = '#0f172a';
   ctx.beginPath();
   ctx.arc(0, -2, 7, 0, Math.PI * 2);
@@ -984,7 +1033,7 @@ function drawPlayer() {
 
   ctx.fillStyle = '#38bdf8';
   ctx.fillRect(-5, -5, 10, 4);
-  ctx.fillStyle = '#ffffff'; // Sun highlight
+  ctx.fillStyle = '#ffffff';
   ctx.fillRect(-3, -5, 3, 2);
 
   ctx.restore();
@@ -1061,12 +1110,12 @@ function drawAmbientAtmosphere() {
   });
 }
 
-// --- UI & OVERLAYS ---
+// --- MODERNIZED UI & OVERLAYS ---
 function drawUI() {
   ctx.textAlign = 'center';
 
   if (gameState === 'MENU') {
-    ctx.fillStyle = 'rgba(15, 23, 42, 0.85)';
+    ctx.fillStyle = 'rgba(15, 23, 42, 0.88)';
     ctx.fillRect(0, 0, width, height);
 
     ctx.fillStyle = '#ffffff';
@@ -1189,7 +1238,7 @@ function drawUI() {
     ctx.fillText(`DISTANCE: ${Math.floor(distance)}m`, 20, 40);
     ctx.fillText(`☕ ${runMugsCollected}`, 20, 65);
 
-    // Pause HUD Button (⏸)
+    // Pause Button
     ctx.fillStyle = 'rgba(15, 23, 42, 0.6)';
     ctx.beginPath();
     ctx.arc(width - 35, 35, 20, 0, Math.PI * 2);
@@ -1199,29 +1248,102 @@ function drawUI() {
     ctx.fillRect(width - 34, 26, 4, 18);
 
   } else if (gameState === 'GAMEOVER') {
+    // Glassmorphic Card Overlay
     ctx.fillStyle = 'rgba(15, 23, 42, 0.88)';
     ctx.fillRect(0, 0, width, height);
 
+    // Card Container
+    const cardWidth = Math.min(width * 0.88, 420);
+    const cardX = (width - cardWidth) / 2;
+    const cardY = height * 0.12;
+    const cardHeight = height * 0.78;
+
+    ctx.fillStyle = 'rgba(30, 41, 59, 0.75)';
+    ctx.fillRect(cardX, cardY, cardWidth, cardHeight);
+    ctx.strokeStyle = '#38bdf8';
+    ctx.lineWidth = 2;
+    ctx.strokeRect(cardX, cardY, cardWidth, cardHeight);
+
+    // Dynamic Scaling Title to Fix Truncation Bug
+    const titleFontSize = Math.min(28, cardWidth * 0.068);
+    ctx.font = `900 ${titleFontSize}px system-ui, sans-serif`;
     ctx.fillStyle = '#ef4444';
-    ctx.font = '900 36px system-ui, sans-serif';
-    ctx.fillText('AVALANCHE CAUGHT YOU!', width / 2, height * 0.35);
+    ctx.textAlign = 'center';
+    ctx.fillText('AVALANCHE CAUGHT YOU!', width / 2, cardY + 50);
 
+    // Run Stats Card
     ctx.fillStyle = '#f8fafc';
-    ctx.font = '600 20px system-ui, sans-serif';
-    ctx.fillText(`DISTANCE SURVIVED: ${Math.floor(distance)}m`, width / 2, height * 0.45);
-    ctx.fillText(`HOT COCOA MUGS: ☕ ${runMugsCollected}`, width / 2, height * 0.52);
+    ctx.font = '600 16px system-ui, sans-serif';
+    ctx.fillText(`DISTANCE SURVIVED: ${Math.floor(distance)}m`, width / 2, cardY + 95);
+    ctx.fillText(`HOT COCOA MUGS: ☕ ${runMugsCollected}`, width / 2, cardY + 125);
 
-    drawButton('RESTART DESCENT', height * 0.70, '#10b981');
+    // High Score Arcade Initials Selector (Ice Hopper / Arcade Style)
+    if (isHighScoreRun && !scoreSubmitted) {
+      ctx.fillStyle = '#f59e0b';
+      ctx.font = '800 18px system-ui, sans-serif';
+      ctx.fillText('★ NEW HIGH SCORE! ★', width / 2, cardY + 165);
+
+      ctx.fillStyle = '#94a3b8';
+      ctx.font = '600 13px system-ui, sans-serif';
+      ctx.fillText('TAP ARROWS TO SELECT YOUR INITIALS:', width / 2, cardY + 190);
+
+      const startX = width / 2 - 80;
+      const pickerY = height * 0.54;
+
+      for (let i = 0; i < 3; i++) {
+        const slotX = startX + i * 55;
+        const letter = ALPHABET[initialsIndices[i]];
+
+        // Up Arrow ▲
+        ctx.fillStyle = '#38bdf8';
+        ctx.beginPath();
+        ctx.moveTo(slotX + 25, pickerY - 25);
+        ctx.lineTo(slotX + 10, pickerY - 10);
+        ctx.lineTo(slotX + 40, pickerY - 10);
+        ctx.fill();
+
+        // Letter Box
+        ctx.fillStyle = i === activeInitialSlot ? '#0284c7' : '#0f172a';
+        ctx.fillRect(slotX, pickerY, 50, 40);
+        ctx.strokeStyle = '#38bdf8';
+        ctx.lineWidth = i === activeInitialSlot ? 3 : 1;
+        ctx.strokeRect(slotX, pickerY, 50, 40);
+
+        ctx.fillStyle = '#ffffff';
+        ctx.font = '800 22px monospace, sans-serif';
+        ctx.fillText(letter, slotX + 25, pickerY + 28);
+
+        // Down Arrow ▼
+        ctx.fillStyle = '#38bdf8';
+        ctx.beginPath();
+        ctx.moveTo(slotX + 25, pickerY + 65);
+        ctx.lineTo(slotX + 10, pickerY + 50);
+        ctx.lineTo(slotX + 40, pickerY + 50);
+        ctx.fill();
+      }
+
+      drawButton('SUBMIT SCORE', height * 0.68, '#f59e0b');
+
+    } else {
+      if (scoreSubmitted) {
+        ctx.fillStyle = '#10b981';
+        ctx.font = '700 16px system-ui, sans-serif';
+        ctx.fillText('SCORE RECORDED ON LEADERBOARD!', width / 2, cardY + 175);
+      }
+
+      drawButton('RESTART DESCENT', height * 0.62, '#10b981');
+      drawButton('MAIN MENU', height * 0.72, '#3b82f6');
+    }
   }
 }
 
 function drawButton(text, y, color) {
   ctx.fillStyle = color;
-  ctx.fillRect(width * 0.15, y, width * 0.7, 50);
+  ctx.fillRect(width * 0.15, y, width * 0.7, 48);
   ctx.fillStyle = '#ffffff';
   ctx.font = '800 16px system-ui, sans-serif';
   ctx.textAlign = 'center';
-  ctx.fillText(text, width / 2, y + 31);
+  ctx.fillText(text, width / 2, y + 30);
 }
 
 // --- MAIN ENGINE LOOP ---
